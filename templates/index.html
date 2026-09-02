@@ -604,20 +604,56 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
         }
 
 // --- Upload & Start ---
+        
+        function uploadWithProgress(url, formData, onProgress) {
+            return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', url, true);
+                xhr.upload.onprogress = (e) => {
+                    if (e.lengthComputable) {
+                        const pct = Math.round((e.loaded / e.total) * 100);
+                        const loadedMB = (e.loaded / 1048576).toFixed(1);
+                        const totalMB = (e.total / 1048576).toFixed(1);
+                        if (onProgress) onProgress(pct, loadedMB, totalMB);
+                    }
+                };
+                xhr.onload = () => {
+                    try {
+                        const json = JSON.parse(xhr.responseText);
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            resolve(json);
+                        } else {
+                            reject(new Error(json.error || 'Upload failed'));
+                        }
+                    } catch (e) {
+                        reject(new Error('Phản hồi không hợp lệ từ server'));
+                    }
+                };
+                xhr.onerror = () => reject(new Error('Lỗi kết nối khi tải file lên'));
+                xhr.send(formData);
+            });
+        }
+
         async function startExtraction() {
             document.getElementById('startBtn').disabled = true;
+            hideError();
             
             try {
-                let res, data;
+                let data;
                 
                 if (inputMode === 'url') {
-                    // URL mode
                     const url = document.getElementById('urlInput').value.trim();
                     if (!url) return;
                     
-    document.getElementById('startBtn').textContent = '⏳ Đang gửi yêu cầu...';
+                    document.getElementById('startBtn').textContent = '⏳ Đang gửi yêu cầu...';
+                    document.getElementById('uploadCard').style.display = 'none';
+                    document.getElementById('progressSection').classList.add('show');
+                    document.getElementById('statusText').textContent = '⬇️ Đang phân tích và tải video từ URL...';
+                    document.getElementById('statusMessage').textContent = 'Đang kết nối...';
+                    document.getElementById('progressFill').style.width = '5%';
+                    document.getElementById('progressPercent').textContent = '5%';
                     
-                    res = await fetch('/api/url', {
+                    const res = await fetch('/api/url', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -628,11 +664,17 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
                             ai_model: document.getElementById('aiModelSelect') ? document.getElementById('aiModelSelect').value : 'gemini-3.7-flash-high'
                         })
                     });
+                    data = await res.json();
+                    if (!res.ok) throw new Error(data.error || 'Yêu cầu thất bại');
                 } else {
-                    // File mode
                     if (!selectedFile) return;
                     
-    document.getElementById('startBtn').textContent = '⏳ Đang tải lên...';
+                    document.getElementById('uploadCard').style.display = 'none';
+                    document.getElementById('progressSection').classList.add('show');
+                    document.getElementById('statusText').textContent = '⬆️ Đang tải video lên server...';
+                    document.getElementById('statusMessage').textContent = 'Đang bắt đầu tải...';
+                    document.getElementById('progressFill').style.width = '0%';
+                    document.getElementById('progressPercent').textContent = '0%';
                     
                     const formData = new FormData();
                     formData.append('video', selectedFile);
@@ -641,29 +683,26 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
                     formData.append('translate_method', translateMethod);
                     formData.append('ai_model', document.getElementById('aiModelSelect') ? document.getElementById('aiModelSelect').value : 'gemini-3.7-flash-high');
                     
-                    res = await fetch('/api/upload', { method: 'POST', body: formData });
+                    data = await uploadWithProgress('/api/upload', formData, (pct, loadedMB, totalMB) => {
+                        document.getElementById('progressFill').style.width = pct + '%';
+                        document.getElementById('progressPercent').textContent = pct + '%';
+                        document.getElementById('statusMessage').textContent = `Đang tải lên: ${loadedMB} / ${totalMB} MB (${pct}%)`;
+                    });
                 }
                 
-                data = await res.json();
-
-                if (!res.ok) {
-                    showError(data.error || 'Thất bại');
-                    document.getElementById('startBtn').disabled = false;
-        document.getElementById('startBtn').textContent = '🚀 Bắt đầu trích xuất phụ đề';
-                    return;
-                }
-
                 currentJobId = data.job_id;
-                document.getElementById('uploadCard').style.display = 'none';
-                document.getElementById('progressSection').classList.add('show');
+                document.getElementById('statusText').textContent = '⚙️ Server đang xử lý video...';
+                document.getElementById('statusMessage').textContent = 'Đang khởi tạo tiến trình...';
                 
                 // Start polling
                 pollInterval = setInterval(pollStatus, 1500);
                 
             } catch (err) {
-        showError('Lỗi kết nối: ' + err.message);
+                showError('Lỗi: ' + err.message);
+                document.getElementById('uploadCard').style.display = 'block';
+                document.getElementById('progressSection').classList.remove('show');
                 document.getElementById('startBtn').disabled = false;
-        document.getElementById('startBtn').textContent = '🚀 Bắt đầu trích xuất phụ đề';
+                document.getElementById('startBtn').textContent = '🚀 Bắt đầu trích xuất phụ đề';
             }
         }
 
@@ -1614,35 +1653,43 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
         async function startHardsub() {
             if (!hardsubFile) { showError('Chưa chọn file video'); return; }
             if (!geminiKeyOk) { showError('Chưa có Gemini API key. Hãy nhập key trước.'); return; }
-
+            
             const btn = document.getElementById('startHardsubBtn');
             btn.disabled = true;
-            btn.textContent = '⏳ Đang tải lên...';
-
+            hideError();
+            
+            document.getElementById('uploadCard').style.display = 'none';
+            document.getElementById('progressSection').classList.add('show');
+            document.getElementById('statusText').textContent = '⬆️ Đang tải video lên server...';
+            document.getElementById('statusMessage').textContent = 'Đang bắt đầu tải...';
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('progressPercent').textContent = '0%';
+            
             try {
                 const formData = new FormData();
                 formData.append('video', hardsubFile);
                 formData.append('gemini_model', document.getElementById('geminiModel').value);
                 formData.append('translate_langs', JSON.stringify([...selectedLangs]));
                 formData.append('translate_method', translateMethod);
-
-                const res = await fetch('/api/hardsub', { method: 'POST', body: formData });
-                const data = await res.json();
-
-                if (!res.ok) {
-                    showError(data.error || 'Thất bại');
-                    btn.disabled = false;
-                    btn.textContent = '🔍 Bắt đầu trích hardsub (Gemini)';
-                    return;
-                }
-
+                formData.append('ai_model', document.getElementById('aiModelSelect') ? document.getElementById('aiModelSelect').value : 'gemini-3.7-flash-high');
+                
+                const data = await uploadWithProgress('/api/hardsub', formData, (pct, loadedMB, totalMB) => {
+                    document.getElementById('progressFill').style.width = pct + '%';
+                    document.getElementById('progressPercent').textContent = pct + '%';
+                    document.getElementById('statusMessage').textContent = `Đang tải lên: ${loadedMB} / ${totalMB} MB (${pct}%)`;
+                });
+                
                 currentJobId = data.job_id;
-                document.getElementById('uploadCard').style.display = 'none';
-                document.getElementById('progressSection').classList.add('show');
+                document.getElementById('statusText').textContent = '🔍 Đang kết nối Gemini AI...';
+                document.getElementById('statusMessage').textContent = 'Đang chuẩn bị trích xuất hardsub...';
+                
+                // Start polling
                 pollInterval = setInterval(pollStatus, 1500);
-
-            } catch(err) {
-                showError('Lỗi kết nối: ' + err.message);
+                
+            } catch (err) {
+                showError('Lỗi: ' + err.message);
+                document.getElementById('uploadCard').style.display = 'block';
+                document.getElementById('progressSection').classList.remove('show');
                 btn.disabled = false;
                 btn.textContent = '🔍 Bắt đầu trích hardsub (Gemini)';
             }

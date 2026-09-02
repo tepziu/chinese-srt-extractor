@@ -1,22 +1,21 @@
 @echo off
 chcp 65001 >nul
-title 🎬 Chinese SRT Extractor - All Services
-call venv\Scripts\activate.bat 2>nul
-echo ============================================================
-echo   🎬 Khởi động tất cả dịch vụ
-echo ============================================================
-echo.
-echo 🌐 Web App:     http://localhost:5000
-echo 🤖 Telegram Bot: @taovideoauto_bot
-echo.
-echo ============================================================
-echo.
-
+title Chinese SRT Extractor - All Services
+cd /d "%~dp0"
 set PYTHONIOENCODING=utf-8
-start "Web App" cmd /k "chcp 65001 >nul && call venv\Scripts\activate.bat && python app.py"
-timeout /t 3 >nul
-start "Telegram Bot" cmd /k "chcp 65001 >nul && call venv\Scripts\activate.bat && python bot.py"
+echo ============================================================
+echo   Chinese SRT Extractor - All Services
+echo ============================================================
+echo.
+echo   Web App:      http://127.0.0.1:5000
+echo   Telegram Bot: Starting...
+echo.
+echo ============================================================
+echo.
 
-echo ✅ Đã khởi động cả Web App và Telegram Bot!
-echo    Nhấn phím bất kỳ để đóng cửa sổ này...
+start "Web App" cmd /k "chcp 65001 >nul && cd /d \"%~dp0\" && if exist \"venv\Scripts\python.exe\" (venv\Scripts\python.exe app.py) else (python app.py)"
+timeout /t 3 >nul
+start "Telegram Bot" cmd /k "chcp 65001 >nul && cd /d \"%~dp0\" && if exist \"venv\Scripts\python.exe\" (venv\Scripts\python.exe bot.py) else (python bot.py)"
+
+echo All services started!
 pause >nul

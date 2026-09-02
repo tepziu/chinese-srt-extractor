@@ -332,8 +332,7 @@ def get_translation_models():
 @api_bp.route("/api/speakers/<job_id>")
 def get_job_speakers(job_id):
     """Return detected speakers and current voice assignments."""
-    job = get_job(job_id)
-    if job is None:
+    job = get_job(job_id) or {}
     speakers = job.get("speakers")
     if not speakers:
         speakers_file = OUTPUT_FOLDER / job_id / "speakers.json"
@@ -346,13 +345,17 @@ def get_job_speakers(job_id):
                     job["segment_speakers"] = data.get("segment_speakers")
             except Exception:
                 pass
+    if not speakers and not job:
+        return jsonify({"error": "Job không tồn tại"}), 404
     if not speakers:
         speakers = {"M1": 1}
-    speakers = job.get("speakers", {"M1": 1})
+
     return jsonify({
         "speakers": speakers,
         "default_voice_maps": SPEAKER_VOICE_MAPS,
     })
+
+
 
 
 # ── TTS ────────────────────────────────────────────────────────────────────

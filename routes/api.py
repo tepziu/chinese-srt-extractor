@@ -19,6 +19,7 @@ from config import (
     jobs, cleanup_old_jobs, create_job, get_job, safe_stem,
     load_presets, save_presets, validate_region, MAX_BLUR_REGIONS,
     GEMINI_MODELS, GEMINI_DEFAULT_MODEL,
+    AI_TRANSLATE_MODELS, AI_DEFAULT_MODEL, SPEAKER_VOICE_MAPS,
     get_gemini_api_key, set_gemini_api_key,
 )
 from services.whisper_engine import process_video
@@ -138,6 +139,9 @@ def upload_video():
         model_size = "large-v3-turbo"
 
     translate_langs = _parse_languages(request.form.get("translate_langs", "[]"))
+    ai_model = request.form.get("ai_model", AI_DEFAULT_MODEL)
+    if ai_model not in AI_TRANSLATE_MODELS and not ai_model.strip():
+        ai_model = AI_DEFAULT_MODEL
     translate_method = request.form.get("translate_method", "ai")
     if translate_method not in ("ai", "google"):
         translate_method = "ai"
@@ -148,6 +152,7 @@ def upload_video():
         video_path=str(video_path),
         translate_langs=translate_langs,
         translate_method=translate_method,
+        ai_model=ai_model,
     )
 
     cleanup_old_jobs()
@@ -191,10 +196,14 @@ def url_download():
 
     cleanup_old_jobs()
 
+    ai_model = data.get("ai_model", AI_DEFAULT_MODEL)
+    if ai_model not in AI_TRANSLATE_MODELS and not str(ai_model).strip():
+        ai_model = AI_DEFAULT_MODEL
     translate_method = data.get("translate_method", "ai")
     if translate_method not in ("ai", "google"):
         translate_method = "ai"
     jobs[job_id]["translate_method"] = translate_method
+    jobs[job_id]["ai_model"] = ai_model
 
     thread = threading.Thread(
         target=process_url_video,
@@ -291,12 +300,37 @@ def download_video_file(job_id):
         safe_name = "video"
     download_name = f"{safe_name}.mp4"
 
+
     return send_file(
         video_file["path"],
         as_attachment=True,
         download_name=download_name,
         mimetype="video/mp4",
     )
+
+
+# ── AI Translation Models & Multi-Speaker ──────────────────────────────
+
+@api_bp.route("/api/translation/models")
+def get_translation_models():
+    """Return available AI translation models."""
+    return jsonify({
+        "models": AI_TRANSLATE_MODELS,
+        "default": AI_DEFAULT_MODEL,
+    })
+
+
+@api_bp.route("/api/speakers/<job_id>")
+def get_job_speakers(job_id):
+    """Return detected speakers and current voice assignments."""
+    job = get_job(job_id)
+    if job is None:
+        return jsonify({"error": "Job không tồn tại"}), 404
+    speakers = job.get("speakers", {"M1": 1})
+    return jsonify({
+        "speakers": speakers,
+        "default_voice_maps": SPEAKER_VOICE_MAPS,
+    })
 
 
 # ── TTS ────────────────────────────────────────────────────────────────────
@@ -353,9 +387,10 @@ def trigger_tts(job_id, lang):
         "style_prompt": str(req_data.get("style_prompt") or "")[:500],
     }
 
+    speaker_voices = req_data.get("speaker_voices")
     thread = threading.Thread(
         target=tts_worker,
-        args=(job_id, lang, srt_content, tts_engine, tts_options),
+        args=(job_id, lang, srt_content, tts_engine, tts_options, speaker_voices),
         daemon=True,
     )
     thread.start()

@@ -296,6 +296,18 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                         <div><div style="font-size:13px; font-weight:600;">Google Translate</div><div style="font-size:11px; color:var(--text-muted);">Nhanh, miễn phí</div></div>
                     </label>
                 </div>
+                <div id="aiModelRow" style="margin-top:10px; display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:rgba(139,92,246,0.08); border:1px solid rgba(139,92,246,0.3); border-radius:10px;">
+                    <div>
+                        <label style="font-size:12px; font-weight:600; color:var(--text-primary);">🤖 Model Dịch AI</label>
+                        <small style="display:block; font-size:11px; color:var(--text-muted);">Lấy từ http://localhost:8317</small>
+                    </div>
+                    <select id="aiModelSelect" style="padding:6px 10px; background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; color:var(--text-primary); font-size:12px;">
+                        <option value="gemini-3.7-flash-high" selected>Gemini 3.7 Flash High ⚡ (Khuyên dùng)</option>
+                        <option value="gpt-5.6-luna">GPT 5.6 Luna 🧠 (Điện ảnh)</option>
+                        <option value="gpt-5.5">GPT 5.5 🌟</option>
+                        <option value="claude-sonnet-4-6">Claude Sonnet 4.6 🎭</option>
+                        <option value="gemini-2.5-flash">Gemini 2.5 Flash 💨</option>
+                    </select>
             </div>
             
             <div class="lang-section" style="margin-top: 12px;">
@@ -371,6 +383,17 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
             <h4 style="font-size:13px; color:var(--text-secondary); margin-bottom:8px;">Xem trước nội dung:</h4>
             <div class="srt-tabs" id="srtTabs"></div>
             <div class="srt-preview" id="srtPreview"></div>
+            <div id="speakerManagerCard" style="display:none; margin-top:14px; padding:14px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <div>
+                        <h4 style="font-size:13px; font-weight:600;">🎭 Phân vai nhân vật (Multi-Speaker Dubbing)</h4>
+                        <p style="font-size:11px; color:var(--text-muted);">AI tự động nhận diện vai và gán giọng tương ứng cho từng nhân vật</p>
+                    </div>
+                    <span id="speakerCountBadge" style="font-size:11px; padding:3px 8px; background:rgba(139,92,246,0.2); color:#a78bfa; border-radius:6px; font-weight:600;">0 nhân vật</span>
+                </div>
+                <div id="speakerList" style="display:flex; flex-direction:column; gap:8px;"></div>
+            </div>
+
             <div class="download-row" id="downloadRow"></div>
             <div class="tts-row" id="ttsRow"></div>
             <div class="tts-row" id="burnSubRow" style="margin-top:6px;"></div>
@@ -410,24 +433,22 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
 // --- Translation Method Toggle ---
         function setTranslateMethod(method) {
             translateMethod = method;
-            const aiEl = document.getElementById('methodAI');
-            const googleEl = document.getElementById('methodGoogle');
-            if (method === 'ai') {
-                aiEl.style.background = 'rgba(139,92,246,0.1)';
-                aiEl.style.borderColor = '#8b5cf6';
-                googleEl.style.background = 'rgba(255,255,255,0.03)';
-                googleEl.style.borderColor = 'var(--border)';
+            const aiEl = document.getElementById("methodAI");
+            const googleEl = document.getElementById("methodGoogle");
+            const aiModelRow = document.getElementById("aiModelRow");
+            if (method === "ai") {
+                aiEl.style.background = "rgba(139,92,246,0.1)";
+                aiEl.style.borderColor = "#8b5cf6";
+                googleEl.style.background = "rgba(255,255,255,0.03)";
+                googleEl.style.borderColor = "var(--border)";
+                if (aiModelRow) aiModelRow.style.display = "flex";
             } else {
-                googleEl.style.background = 'rgba(34,197,94,0.1)';
-                googleEl.style.borderColor = '#22c55e';
-                aiEl.style.background = 'rgba(255,255,255,0.03)';
-                aiEl.style.borderColor = 'var(--border)';
+                googleEl.style.background = "rgba(34,197,94,0.1)";
+                googleEl.style.borderColor = "#22c55e";
+                aiEl.style.background = "rgba(255,255,255,0.03)";
+                aiEl.style.borderColor = "var(--border)";
+                if (aiModelRow) aiModelRow.style.display = "none";
             }
-        }
-
-// --- TTS Engine Toggle ---
-        async function setTTSEngine(engine) {
-            ttsEngine = engine;
             const edgeEl = document.getElementById('ttsEdge');
             const omniEl = document.getElementById('ttsOmni');
             const geminiEl = document.getElementById('ttsGemini');
@@ -599,11 +620,13 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            url: url,
-                            model_size: document.getElementById('modelSize').value,
-                            translate_langs: [...selectedLangs],
-                            translate_method: translateMethod,
-                        })
+                        retry: isRetry,
+                        force: isRetry,
+                        engine: ttsEngine,
+                        voice: document.getElementById("geminiTTSVoice").value,
+                        emotion: document.getElementById("geminiTTSEmotion").value,
+                        style_prompt: document.getElementById("geminiTTSStyle").value,
+                        speaker_voices: (function(){ const m={}; document.querySelectorAll(".speaker-voice-select").forEach(s=>{ m[s.dataset.speaker]=s.value }); return m; })(),
                     });
                 } else {
                     // File mode
@@ -798,6 +821,47 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
             
             tabContainer.innerHTML = tabsHtml;
             downloadRow.innerHTML = downloadsHtml;
+
+            // Populate Multi-Speaker Character Manager
+            const speakers = data.speakers || {};
+            const speakerCard = document.getElementById("speakerManagerCard");
+            const speakerList = document.getElementById("speakerList");
+            const speakerCountBadge = document.getElementById("speakerCountBadge");
+            if (speakerCard && speakerList && Object.keys(speakers).length > 0) {
+                speakerCard.style.display = "block";
+                const spkCount = Object.keys(speakers).length;
+                speakerCountBadge.textContent = `${spkCount} nhân vật`;
+                const roleMeta = {
+                    "M1": { name: "Nam chính", icon: "👨", color: "#3b82f6" },
+                    "F1": { name: "Nữ chính", icon: "👩", color: "#ec4899" },
+                    "M2": { name: "Nam phụ", icon: "👦", color: "#60a5fa" },
+                    "F2": { name: "Nữ phụ", icon: "👧", color: "#f472b6" },
+                    "N":  { name: "Dẫn chuyện", icon: "🎙️", color: "#a78bfa" },
+                };
+                let html = "";
+                for (const [spkId, count] of Object.entries(speakers)) {
+                    const meta = roleMeta[spkId] || { name: `Nhân vật ${spkId}`, icon: "👤", color: "#888" };
+                    const isFem = spkId.startsWith("F");
+                    html += `
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:rgba(255,255,255,0.03); border-left:3px solid ${meta.color}; border-radius:6px;">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span style="font-size:16px;">${meta.icon}</span>
+                                <div>
+                                    <span style="font-size:12px; font-weight:600; color:${meta.color};">[${escapeHtml(spkId)}] ${meta.name}</span>
+                                    <span style="font-size:11px; color:var(--text-muted); margin-left:4px;">(${count} câu)</span>
+                                </div>
+                            </div>
+                            <select class="speaker-voice-select" data-speaker="${escapeHtml(spkId)}" style="padding:4px 8px; background:var(--bg-secondary); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:11px;">
+                                <option value="vi-VN-NamMinhNeural" ${!isFem ? "selected" : ""}>👨 Nam Minh (Nam trầm)</option>
+                                <option value="vi-VN-HoaiMyNeural" ${isFem ? "selected" : ""}>👩 Hoài My (Nữ truyền cảm)</option>
+                            </select>
+                        </div>
+                    `;
+                }
+                speakerList.innerHTML = html;
+            } else if (speakerCard) {
+                speakerCard.style.display = "none";
+            }
 
             // Build TTS buttons
             const ttsRow = document.getElementById('ttsRow');

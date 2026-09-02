@@ -1,4 +1,4 @@
-"""TTS generation with segment caching, silence trimming, incremental retry, and timeline alignment."""
+"""TTS generation with multi-speaker support, segment caching, silence trimming, and timeline sync."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import edge_tts
 from pydub import AudioSegment
 from pydub.silence import detect_leading_silence
 
-from config import LANGUAGES, OUTPUT_FOLDER, TTS_VOICES, UPLOAD_FOLDER, jobs
+from config import LANGUAGES, OUTPUT_FOLDER, SPEAKER_VOICE_MAPS, TTS_VOICES, UPLOAD_FOLDER, jobs
 from services.google_tts import synthesize_to_wav
 from services.srt_utils import parse_srt_timing
 
@@ -54,7 +54,7 @@ def _trim_silence(audio: AudioSegment, silence_threshold: int = -40, padding_ms:
 
 
 def _speed_audio_to_fit(source_path: str, audio: AudioSegment, max_duration_ms: int) -> AudioSegment:
-    """Trim silence and gently adjust speed to fit the subtitle slot without distortion."""
+    """Trim silence and adjust speed gently to fit the subtitle slot without distortion."""
     audio = _trim_silence(audio)
     curr_len = len(audio)
     if max_duration_ms <= 0 or curr_len <= max_duration_ms:
@@ -90,11 +90,39 @@ def _speed_audio_to_fit(source_path: str, audio: AudioSegment, max_duration_ms: 
     return audio
 
 
-def generate_edge_tts_audio(job_id: str, lang: str, segments: list, total: int, temp_dir: Path, tts_key: str):
-    voice = TTS_VOICES.get(lang, TTS_VOICES.get("en"))
+def _resolve_speaker_voice(engine: str, lang: str, speaker_id: str, custom_map: dict | None = None) -> tuple[str, str]:
+    """Resolve the voice name and pitch/emotion for a given speaker."""
+    if custom_map and speaker_id in custom_map:
+        val = custom_map[speaker_id]
+        if isinstance(val, str):
+            return val, "+0Hz" if engine == "edge" else "warm"
+        if isinstance(val, dict):
+            return val.get("voice", TTS_VOICES.get(lang, "vi-VN-NamMinhNeural")), val.get("pitch", "+0Hz")
+
+    engine_map = SPEAKER_VOICE_MAPS.get(engine, {}).get(lang, {})
+    if speaker_id in engine_map:
+        info = engine_map[speaker_id]
+        return info["voice"], info.get("pitch", "+0Hz") if engine == "edge" else info.get("emotion", "warm")
+
+    default_v = TTS_VOICES.get(lang, "vi-VN-NamMinhNeural")
+    return default_v, "+0Hz" if engine == "edge" else "warm"
+
+
+def generate_edge_tts_audio(
+    job_id: str,
+    lang: str,
+    segments: list,
+    total: int,
+    temp_dir: Path,
+    tts_key: str,
+    speaker_voices: dict | None = None,
+):
+    segment_speakers = jobs.get(job_id, {}).get("segment_speakers") or ["M1"] * len(segments)
 
     async def generate_single_segment(index: int, text: str):
-        output = temp_dir / f"seg_{index:04d}.mp3"
+        spk = segment_speakers[index] if index < len(segment_speakers) else "M1"
+        voice, pitch = _resolve_speaker_voice("edge", lang, spk, speaker_voices)
+        output = temp_dir / f"seg_{index:04d}_{spk}.mp3"
         if output.exists() and output.stat().st_size > 0:
             return str(output)
 
@@ -103,14 +131,15 @@ def generate_edge_tts_audio(job_id: str, lang: str, segments: list, total: int, 
             if _cancelled(job_id):
                 raise RuntimeError("Đã hủy TTS (Stop)")
             try:
-                await edge_tts.Communicate(text, voice).save(str(output))
+                communicate = edge_tts.Communicate(text, voice, pitch=pitch)
+                await communicate.save(str(output))
                 if output.exists() and output.stat().st_size > 0:
                     return str(output)
             except Exception as exc:
                 last_error = exc
                 if attempt < 4:
                     await asyncio.sleep(2 + attempt * 2)
-        print(f"Edge-TTS segment {index} failed: {last_error}")
+        print(f"Edge-TTS segment {index} ({spk}) failed: {last_error}")
         return None
 
     async def generate_all():
@@ -118,7 +147,8 @@ def generate_edge_tts_audio(job_id: str, lang: str, segments: list, total: int, 
         missing_indices = []
 
         for i in range(len(segments)):
-            p = temp_dir / f"seg_{i:04d}.mp3"
+            spk = segment_speakers[i] if i < len(segment_speakers) else "M1"
+            p = temp_dir / f"seg_{i:04d}_{spk}.mp3"
             if p.exists() and p.stat().st_size > 0:
                 paths[i] = str(p)
             else:
@@ -195,16 +225,27 @@ def generate_omnivoice_audio(job_id: str, lang: str, segments: list, total: int,
         jobs.get(job_id, {}).pop("_tts_process", None)
 
 
-def generate_gemini_tts_audio(job_id: str, lang: str, segments: list, total: int, temp_dir: Path, tts_key: str, options: dict | None = None):
+def generate_gemini_tts_audio(
+    job_id: str,
+    lang: str,
+    segments: list,
+    total: int,
+    temp_dir: Path,
+    tts_key: str,
+    options: dict | None = None,
+    speaker_voices: dict | None = None,
+):
     options = options or {}
-    voice = str(options.get("voice") or "Charon").strip()[:40]
-    emotion = str(options.get("emotion") or "warm").strip().lower()[:30]
     style_prompt = str(options.get("style_prompt") or "").strip()[:500]
+    segment_speakers = jobs.get(job_id, {}).get("segment_speakers") or ["M1"] * len(segments)
+
     paths = []
     for index, (_start, _end, text) in enumerate(segments):
         if _cancelled(job_id):
             raise RuntimeError("Đã hủy TTS (Stop)")
-        output = temp_dir / f"seg_{index:04d}.wav"
+        spk = segment_speakers[index] if index < len(segment_speakers) else "M1"
+        voice, emotion = _resolve_speaker_voice("gemini", lang, spk, speaker_voices)
+        output = temp_dir / f"seg_{index:04d}_{spk}.wav"
         if output.exists() and output.stat().st_size > 0:
             paths.append(str(output))
             continue
@@ -216,13 +257,20 @@ def generate_gemini_tts_audio(job_id: str, lang: str, segments: list, total: int
             )
             paths.append(str(output))
         except Exception as exc:
-            print(f"Gemini TTS segment {index} failed: {exc}")
+            print(f"Gemini TTS segment {index} ({spk}) failed: {exc}")
             paths.append(None)
         _mark_progress(job_id, tts_key, int((index + 1) / total * 80), f"Gemini đang tạo giọng: {index + 1}/{total}")
     return paths
 
 
-def generate_tts_audio(job_id: str, lang: str, srt_content: str, engine: str = "edge", options: dict | None = None):
+def generate_tts_audio(
+    job_id: str,
+    lang: str,
+    srt_content: str,
+    engine: str = "edge",
+    options: dict | None = None,
+    speaker_voices: dict | None = None,
+):
     segments = parse_srt_timing(srt_content)
     if not segments:
         raise RuntimeError("Không tìm thấy phụ đề để tạo audio")
@@ -237,9 +285,9 @@ def generate_tts_audio(job_id: str, lang: str, srt_content: str, engine: str = "
         if engine == "omnivoice":
             segment_paths = generate_omnivoice_audio(job_id, lang, segments, len(segments), temp_dir, tts_key)
         elif engine == "gemini":
-            segment_paths = generate_gemini_tts_audio(job_id, lang, segments, len(segments), temp_dir, tts_key, options)
+            segment_paths = generate_gemini_tts_audio(job_id, lang, segments, len(segments), temp_dir, tts_key, options, speaker_voices)
         else:
-            segment_paths = generate_edge_tts_audio(job_id, lang, segments, len(segments), temp_dir, tts_key)
+            segment_paths = generate_edge_tts_audio(job_id, lang, segments, len(segments), temp_dir, tts_key, speaker_voices)
 
         _mark_progress(job_id, tts_key, 85, "Đang ghép audio theo timeline...")
         video_duration_ms = int(float(jobs[job_id].get("duration", 0) or 0) * 1000)
@@ -283,8 +331,15 @@ def generate_tts_audio(job_id: str, lang: str, srt_content: str, engine: str = "
         raise
 
 
-def tts_worker(job_id: str, lang: str, srt_content: str, engine: str = "edge", options: dict | None = None):
+def tts_worker(
+    job_id: str,
+    lang: str,
+    srt_content: str,
+    engine: str = "edge",
+    options: dict | None = None,
+    speaker_voices: dict | None = None,
+):
     try:
-        generate_tts_audio(job_id, lang, srt_content, engine, options)
+        generate_tts_audio(job_id, lang, srt_content, engine, options, speaker_voices)
     except Exception as exc:
         print(f"TTS Worker exception: {exc}")

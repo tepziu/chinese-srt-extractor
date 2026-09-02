@@ -213,12 +213,91 @@ def start_cleanup_worker() -> None:
     _cleanup_thread.start()
 
 
+AI_TRANSLATE_MODELS = {
+    "gemini-3.7-flash-high": {
+        "name": "Gemini 3.7 Flash High ⚡ (Khuyên dùng)",
+        "description": "Nhanh, thông minh, dịch xưng hô và văn cảnh tiếng Trung chuẩn",
+        "tier": "recommended",
+    },
+    "gpt-5.6-luna": {
+        "name": "GPT 5.6 Luna 🧠 (Điện ảnh / Kịch tính)",
+        "description": "Văn phong trau chuốt, giàu cảm xúc cho phim và kịch",
+        "tier": "cinema",
+    },
+    "gpt-5.5": {
+        "name": "GPT 5.5 🌟",
+        "description": "Mô hình cân bằng, ổn định",
+        "tier": "standard",
+    },
+    "claude-sonnet-4-6": {
+        "name": "Claude Sonnet 4.6 🎭",
+        "description": "Độ chính xác ngữ pháp và chuyển ngữ mượt mà",
+        "tier": "high",
+    },
+    "gemini-2.5-flash": {
+        "name": "Gemini 2.5 Flash 💨",
+        "description": "Siêu nhẹ, phản hồi nhanh",
+        "tier": "fast",
+    },
+}
+AI_DEFAULT_MODEL = os.getenv("AI_TRANSLATE_MODEL", "gemini-3.7-flash-high")
+
 AI_TRANSLATE_CONFIG = {
     "base_url": os.getenv("AI_TRANSLATE_BASE_URL", "http://127.0.0.1:8317/v1").rstrip("/"),
     "api_key": os.getenv("AI_TRANSLATE_API_KEY", "").strip(),
-    "model": os.getenv("AI_TRANSLATE_MODEL", "gpt-5.5"),
+    "model": AI_DEFAULT_MODEL,
 }
 AI_LANG_NAMES = {"vi": "Vietnamese", "en": "English", "id": "Indonesian"}
+
+# Multi-speaker voice assignments per language and engine
+SPEAKER_VOICE_MAPS = {
+    "edge": {
+        "vi": {
+            "M1": {"voice": "vi-VN-NamMinhNeural", "name": "Nam chính (Nam Minh)", "gender": "male", "pitch": "+0Hz"},
+            "F1": {"voice": "vi-VN-HoaiMyNeural", "name": "Nữ chính (Hoài My)", "gender": "female", "pitch": "+0Hz"},
+            "M2": {"voice": "vi-VN-NamMinhNeural", "name": "Nam phụ (Trầm)", "gender": "male", "pitch": "-4Hz"},
+            "F2": {"voice": "vi-VN-HoaiMyNeural", "name": "Nữ phụ (Trẻ)", "gender": "female", "pitch": "+4Hz"},
+            "N": {"voice": "vi-VN-NamMinhNeural", "name": "Dẫn chuyện", "gender": "neutral", "pitch": "+0Hz"},
+        },
+        "en": {
+            "M1": {"voice": "en-US-GuyNeural", "name": "Male Lead (Guy)", "gender": "male", "pitch": "+0Hz"},
+            "F1": {"voice": "en-US-JennyNeural", "name": "Female Lead (Jenny)", "gender": "female", "pitch": "+0Hz"},
+            "M2": {"voice": "en-US-ChristopherNeural", "name": "Male Secondary", "gender": "male", "pitch": "-4Hz"},
+            "F2": {"voice": "en-US-AriaNeural", "name": "Female Secondary", "gender": "female", "pitch": "+4Hz"},
+            "N": {"voice": "en-US-GuyNeural", "name": "Narrator", "gender": "neutral", "pitch": "+0Hz"},
+        },
+        "id": {
+            "M1": {"voice": "id-ID-ArdiNeural", "name": "Pria Utama (Ardi)", "gender": "male", "pitch": "+0Hz"},
+            "F1": {"voice": "id-ID-GadisNeural", "name": "Wanita Utama (Gadis)", "gender": "female", "pitch": "+0Hz"},
+            "M2": {"voice": "id-ID-ArdiNeural", "name": "Pria Pendukung", "gender": "male", "pitch": "-4Hz"},
+            "F2": {"voice": "id-ID-GadisNeural", "name": "Wanita Pendukung", "gender": "female", "pitch": "+4Hz"},
+            "N": {"voice": "id-ID-ArdiNeural", "name": "Narator", "gender": "neutral", "pitch": "+0Hz"},
+        },
+        "zh": {
+            "M1": {"voice": "zh-CN-YunxiNeural", "name": "男主 (云希)", "gender": "male", "pitch": "+0Hz"},
+            "F1": {"voice": "zh-CN-XiaoxiaoNeural", "name": "女主 (晓晓)", "gender": "female", "pitch": "+0Hz"},
+            "M2": {"voice": "zh-CN-YunjianNeural", "name": "男配 (云健)", "gender": "male", "pitch": "-4Hz"},
+            "F2": {"voice": "zh-CN-XiaoyiNeural", "name": "女配 (晓伊)", "gender": "female", "pitch": "+4Hz"},
+            "N": {"voice": "zh-CN-YunxiNeural", "name": "旁白", "gender": "neutral", "pitch": "+0Hz"},
+        }
+    },
+    "gemini": {
+        "vi": {
+            "M1": {"voice": "Charon", "name": "Nam chính (Charon)", "gender": "male", "emotion": "warm"},
+            "F1": {"voice": "Kore", "name": "Nữ chính (Kore)", "gender": "female", "emotion": "warm"},
+            "M2": {"voice": "Fenrir", "name": "Nam phụ (Fenrir)", "gender": "male", "emotion": "dramatic"},
+            "F2": {"voice": "Aoede", "name": "Nữ phụ (Aoede)", "gender": "female", "emotion": "intimate"},
+            "N": {"voice": "Zephyr", "name": "Dẫn chuyện (Zephyr)", "gender": "neutral", "emotion": "neutral"},
+        },
+        "en": {
+            "M1": {"voice": "Charon", "name": "Male Lead (Charon)", "gender": "male", "emotion": "warm"},
+            "F1": {"voice": "Kore", "name": "Female Lead (Kore)", "gender": "female", "emotion": "warm"},
+            "M2": {"voice": "Fenrir", "name": "Male Secondary", "gender": "male", "emotion": "dramatic"},
+            "F2": {"voice": "Aoede", "name": "Female Secondary", "gender": "female", "emotion": "intimate"},
+            "N": {"voice": "Zephyr", "name": "Narrator", "gender": "neutral", "emotion": "neutral"},
+        }
+    }
+}
 
 TTS_VOICES = {
     "vi": "vi-VN-NamMinhNeural",

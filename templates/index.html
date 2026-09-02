@@ -406,7 +406,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
         let selectedFile = null;
         let currentJobId = null;
         let pollInterval = null;
-        let selectedLangs = new Set();
+        let selectedLangs = new Set(['vi']);
         let resultData = null;
         let translateMethod = 'ai';
         let ttsEngine = 'edge';
@@ -635,6 +635,7 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
                     formData.append('model_size', document.getElementById('modelSize').value);
                     formData.append('translate_langs', JSON.stringify([...selectedLangs]));
                     formData.append('translate_method', translateMethod);
+                    formData.append('ai_model', document.getElementById('aiModelSelect') ? document.getElementById('aiModelSelect').value : 'gemini-3.7-flash-high');
                     
                     res = await fetch('/api/upload', { method: 'POST', body: formData });
                 }
@@ -1430,6 +1431,20 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
                 document.getElementById('urlReady').classList.remove('show');
             }
         }
+
+// --- Auto-select Vietnamese ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const viOpt = document.querySelector('.lang-option[data-lang="vi"]');
+            if (viOpt && !viOpt.classList.contains('selected')) {
+                viOpt.classList.add('selected');
+                viOpt.querySelector('.lang-status').textContent = '✅ Đã chọn';
+                const checkmark = viOpt.querySelector('.checkmark');
+                if (checkmark) checkmark.style.color = 'white';
+                const cb = viOpt.querySelector('input[type="checkbox"]');
+                if (cb) cb.checked = true;
+            }
+            updateSelectedCount();
+        });
 
 // --- Load device info ---
         (async function loadDeviceInfo() {

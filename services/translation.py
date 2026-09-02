@@ -1,4 +1,4 @@
-"""Subtitle translation with multi-speaker detection, length control, and strict SRT validation."""
+"""Subtitle translation with multi-speaker detection, strict word budgeting, and adaptive auto-compress."""
 
 from __future__ import annotations
 
@@ -59,8 +59,59 @@ def _fallback_google(batch: list, translated_map: dict, start_i: int, target_lan
             translated_map[index] = text
 
 
+def _auto_compress_long_lines(
+    client,
+    model: str,
+    lang_name: str,
+    long_items: list[tuple[int, str, str, int, float]],
+    translated_map: dict[int, str],
+    speaker_map: dict[int, str],
+) -> None:
+    """Adaptive Pass: Automatically compress lines that exceed the target speaking budget."""
+    if not long_items:
+        return
+
+    compress_lines = []
+    for offset, (idx, spk, curr_text, max_w, dur_s) in enumerate(long_items):
+        compress_lines.append(
+            f"{offset + 1}. [Thời lượng: {dur_s}s | BẮT BUỘC TỐI ĐA {max_w} TỪ] [{spk}] {curr_text}"
+        )
+    compress_prompt = (
+        f"Các câu thoại tiếng {lang_name} sau đây đang bị QUÁ DÀI so với thời lượng nhân vật nói trong video.\n"
+        f"Hãy viết lại từng câu thành MỘT CÂU NGẮN GỌN HƠN, xúc tích, giữ nguyên 100% ý chính và xưng hô.\n"
+        "QUY TẮC:\n"
+        "1. BẮT BUỘC KHÔNG VƯỢT QUÁ số từ tối đa đã ghi trong ngoặc.\n"
+        "2. Giữ nguyên mã nhân vật [M1], [F1], [M2], [F2], [N] ở đầu câu.\n"
+        "3. Chỉ trả về danh sách đánh số, KHÔNG giải thích thêm.\n\n"
+        + "\n".join(compress_lines)
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": f"Bạn là chuyên gia biên tập rút gọn lời thoại phim {lang_name} siêu ngắn gọn và tự nhiên."},
+                {"role": "user", "content": compress_prompt},
+            ],
+            temperature=0.2,
+            max_tokens=1500,
+        )
+        parsed_comp, parsed_spk = _parse_numbered_result(response.choices[0].message.content, len(long_items))
+        for offset, (idx, orig_spk, orig_text, max_w, dur_s) in enumerate(long_items):
+            if offset in parsed_comp:
+                new_text = parsed_comp[offset]
+                # If compressed text is actually shorter, apply it!
+                if len(new_text.split()) < len(orig_text.split()):
+                    print(f"  ✨ Auto-compressed line {idx+1}: '{orig_text}' ({len(orig_text.split())} words) -> '{new_text}' ({len(new_text.split())} words, max {max_w})")
+                    translated_map[idx] = new_text
+                    if offset in parsed_spk:
+                        speaker_map[idx] = parsed_spk[offset]
+    except Exception as exc:
+        print(f"⚠️ Auto-compress error ({exc}), keeping original translations")
+
+
 def translate_srt_ai(srt_content: str, target_lang: str, job_id: str, ai_model: str | None = None) -> str:
-    """Translate SRT using AI with length-awareness and multi-speaker role detection."""
+    """Translate SRT using AI with strict word budgeting and adaptive auto-compress."""
     from openai import OpenAI
 
     entries = parse_srt(srt_content)
@@ -75,12 +126,18 @@ def translate_srt_ai(srt_content: str, target_lang: str, job_id: str, ai_model: 
     client = OpenAI(base_url=AI_TRANSLATE_CONFIG["base_url"], api_key=AI_TRANSLATE_CONFIG["api_key"])
     lang_name = AI_LANG_NAMES.get(target_lang, target_lang)
 
-    # Parse timing to compute slot duration for each line
+    # Parse timing to compute accurate available duration and target word budget
     timings = parse_srt_timing(srt_content)
     durations = {}
-    for i, (s_ms, e_ms, _) in enumerate(timings):
-        dur_s = max(0.8, round((e_ms - s_ms) / 1000, 1))
-        durations[i] = dur_s
+    word_budgets = {}
+    for i in range(len(timings)):
+        s_ms, e_ms, _ = timings[i]
+        next_s_ms = timings[i + 1][0] if i + 1 < len(timings) else e_ms + 2000
+        avail_ms = next_s_ms - s_ms
+        avail_s = max(0.8, round(avail_ms / 1000, 1))
+        durations[i] = avail_s
+        # 3.2 words/second is standard comfortable speaking rate for Vietnamese
+        word_budgets[i] = max(2, int(avail_s * 3.2))
 
     batch_size = 15
     batches = [(start, entries[start : start + batch_size]) for start in range(0, len(entries), batch_size)]
@@ -94,21 +151,23 @@ def translate_srt_ai(srt_content: str, target_lang: str, job_id: str, ai_model: 
         numbered_lines = []
         for offset, entry in enumerate(batch):
             idx = start_i + offset
-            dur_info = f"[Thời lượng: {durations.get(idx, 2.0)}s]"
+            dur_s = durations.get(idx, 2.0)
+            max_w = word_budgets.get(idx, 6)
+            dur_info = f"[Thời lượng: {dur_s}s | TỐI ĐA: {max_w} TỪ]"
             numbered_lines.append(f"{offset + 1}. {dur_info} {entry[2]}")
         numbered_text = "\n".join(numbered_lines)
 
         prompt = (
             f"Bạn là chuyên gia dịch thuật phụ đề và lồng tiếng phim chuyên nghiệp (Trung sang {lang_name}).\n"
             f"Hãy dịch các câu thoại tiếng Trung sau sang {lang_name} tự nhiên, đúng ngữ cảnh đối thoại.\n\n"
-            "QUY TẮC:\n"
+            "QUY TẮC BẮT BUỘC:\n"
             "1. PHÂN VAI NHÂN VẬT: Gắn mã nhân vật vào đầu mỗi câu dịch:\n"
             "   - [M1] = Nam chính\n"
             "   - [F1] = Nữ chính\n"
             "   - [M2] = Nam phụ\n"
             "   - [F2] = Nữ phụ\n"
             "   - [N]  = Dẫn chuyện / Thuyết minh\n"
-            "2. KHỐNG CHẾ ĐỘ DÀI: Dịch ngắn gọn, xúc tích tương ứng với thời lượng của câu (khoảng 3-4 từ/giây) để giọng đọc vừa khớp video.\n"
+            "2. NGÂN SÁCH SỐ TỪ: BẮT BUỘC KHÔNG ĐƯỢC VƯỢT QUÁ số từ tối đa ghi trong ngoặc. Dịch cô đọng, súc tích, gãy gọn để khi lồng tiếng đọc vừa khít thời lượng, KHÔNG BỊ TRÀN TIẾNG.\n"
             "3. ĐỊNH DẠNG: Chỉ trả về các dòng đánh số tương ứng với số thứ tự, KHÔNG giải thích thêm.\n\n"
             f"{numbered_text}"
         )
@@ -121,7 +180,7 @@ def translate_srt_ai(srt_content: str, target_lang: str, job_id: str, ai_model: 
                 response = client.chat.completions.create(
                     model=model,
                     messages=[
-                        {"role": "system", "content": f"Bạn là dịch giả phụ đề phim Trung - {lang_name} xuất sắc."},
+                        {"role": "system", "content": f"Bạn là dịch giả phụ đề phim Trung - {lang_name} xuất sắc, chuyên gia khống chế độ dài câu thoại."},
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.3,
@@ -145,9 +204,23 @@ def translate_srt_ai(srt_content: str, target_lang: str, job_id: str, ai_model: 
             for offset in range(len(batch)):
                 speaker_map[start_i + offset] = "M1"
         else:
+            # Check for any line that exceeded its word budget by > 30%
+            long_items_in_batch = []
             for offset, text in parsed_text.items():
-                translated_map[start_i + offset] = text
-                speaker_map[start_i + offset] = parsed_spk.get(offset, "M1")
+                idx = start_i + offset
+                spk = parsed_spk.get(offset, "M1")
+                translated_map[idx] = text
+                speaker_map[idx] = spk
+
+                words_count = len(text.split())
+                max_allowed = word_budgets.get(idx, 6)
+                dur_s = durations.get(idx, 2.0)
+                if words_count > max(max_allowed + 2, int(max_allowed * 1.35)):
+                    long_items_in_batch.append((idx, spk, text, max_allowed, dur_s))
+
+            # Trigger Adaptive Auto-Compress if needed
+            if long_items_in_batch:
+                _auto_compress_long_lines(client, model, lang_name, long_items_in_batch, translated_map, speaker_map)
 
         progress = min(int(batch_number / len(batches) * 100), 99)
         jobs[job_id].setdefault("translate_progress", {})[target_lang] = progress

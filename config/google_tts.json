@@ -1,0 +1,17 @@
+{
+  "endpoint": "https://generativelanguage.googleapis.com/v1beta/interactions",
+  "model_name": "gemini-3.1-flash-tts-preview",
+  "voice_name": "Charon",
+  "sample_rate_hertz": 24000,
+  "timeout_seconds": 60,
+  "default_emotion": "warm",
+  "style_prompt": "Deliver a polished, human, cinematic adult narration.",
+  "language_profiles": {
+    "vi-VN": {
+      "style_prompt": "Đọc bằng tiếng Việt tự nhiên, phát âm rõ dấu và phụ âm cuối, nhịp điệu điện ảnh nhưng gần gũi. Giữ giọng người trưởng thành và tránh ngữ điệu máy móc."
+    },
+    "en-US": {
+      "style_prompt": "Speak in natural American English with clear articulation, human rhythm, and cinematic restraint. Avoid an announcer-like cadence."
+    }
+  }
+}

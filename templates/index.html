@@ -1,0 +1,1603 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Chinese SRT Extractor &amp; Translator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+    --bg-primary: #0a0a0f; --bg-secondary: #12121a; --bg-card: #1a1a2e; --bg-card-hover: #22223a;
+    --border: rgba(255,255,255,0.06); --border-active: rgba(239,68,68,0.4);
+    --text-primary: #f0f0f5; --text-secondary: #8888a0; --text-muted: #55556a;
+    --accent: #ef4444; --accent-glow: rgba(239,68,68,0.15); --accent-secondary: #f97316;
+    --success: #22c55e; --warning: #eab308; --info: #3b82f6;
+    --radius: 16px; --radius-sm: 10px;
+}
+body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; overflow-x: hidden; }
+.bg-animation { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.bg-animation::before { content: ''; position: absolute; width: 600px; height: 600px; background: radial-gradient(circle, rgba(239,68,68,0.03) 0%, transparent 70%); top: -200px; right: -200px; animation: float 20s infinite alternate; }
+.bg-animation::after { content: ''; position: absolute; width: 500px; height: 500px; background: radial-gradient(circle, rgba(249,115,22,0.03) 0%, transparent 70%); bottom: -150px; left: -150px; animation: float 25s infinite alternate-reverse; }
+@keyframes float { 0% { transform: translate(0, 0) scale(1); } 100% { transform: translate(50px, 30px) scale(1.1); } }
+.container { max-width: 580px; margin: 0 auto; padding: 24px 16px; position: relative; z-index: 1; }
+.header { text-align: center; margin-bottom: 24px; position: relative; }
+.header-icon { font-size: 40px; margin-bottom: 8px; }
+.header h1 { font-size: 20px; font-weight: 700; background: linear-gradient(135deg, var(--accent), var(--accent-secondary)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 4px; }
+.header p { font-size: 13px; color: var(--text-secondary); }
+.btn-exit { position: absolute; top: 0; right: 0; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #ef4444; padding: 6px 12px; border-radius: 8px; font-size: 11px; cursor: pointer; transition: all 0.3s; }
+.btn-exit:hover { background: rgba(239,68,68,0.2); }
+.device-badge { display: inline-block; padding: 6px 14px; border-radius: 20px; font-size: 11px; font-weight: 500; margin-top: 10px; }
+.device-badge.gpu { background: rgba(34,197,94,0.1); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+.device-badge.cpu { background: rgba(59,130,246,0.1); color: #3b82f6; border: 1px solid rgba(59,130,246,0.3); }
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+.input-tabs { display: flex; gap: 4px; margin-bottom: 16px; background: var(--bg-secondary); border-radius: var(--radius-sm); padding: 3px; }
+.input-tab { flex: 1; padding: 8px; border: none; background: transparent; color: var(--text-secondary); border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 500; transition: all 0.3s; }
+.input-tab.active { background: var(--bg-card); color: var(--text-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+.input-panel { display: none; }
+.input-panel.active { display: block; }
+.upload-zone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 32px 20px; text-align: center; cursor: pointer; transition: all 0.3s; }
+.upload-zone:hover, .upload-zone.dragover { border-color: var(--accent); background: var(--accent-glow); }
+.upload-zone .icon { font-size: 36px; margin-bottom: 8px; }
+.upload-zone h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.upload-zone p { font-size: 12px; color: var(--text-muted); }
+.upload-zone input[type="file"] { display: none; }
+.url-input-group { display: flex; gap: 8px; }
+.url-input { flex: 1; padding: 10px 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px; outline: none; }
+.url-input:focus { border-color: var(--accent); }
+.btn-paste { padding: 10px 16px; background: rgba(139,92,246,0.1); border: 1px solid #8b5cf6; color: #8b5cf6; border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.url-platforms { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.platform-tag { padding: 3px 8px; background: var(--bg-secondary); border-radius: 6px; font-size: 10px; color: var(--text-muted); }
+.url-ready { display: none; margin-top: 10px; padding: 8px 12px; background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); border-radius: 8px; font-size: 12px; color: #22c55e; }
+.url-ready.show { display: flex; align-items: center; gap: 8px; }
+.file-info { display: none; padding: 12px; background: var(--bg-secondary); border-radius: var(--radius-sm); margin-top: 12px; align-items: center; gap: 12px; }
+.file-info.show { display: flex; }
+.file-icon { font-size: 28px; }
+.file-details { flex: 1; }
+.file-name { font-size: 13px; font-weight: 500; word-break: break-all; }
+.file-size { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.remove-btn { background: none; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer; padding: 4px; }
+.setting-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-top: 1px solid var(--border); margin-top: 12px; }
+.setting-row label { font-size: 13px; font-weight: 500; }
+.setting-row small { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.setting-row select { padding: 8px 12px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 12px; }
+.lang-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.lang-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+.lang-header h4 { font-size: 14px; font-weight: 600; }
+.lang-header p { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.btn-select-all { padding: 6px 12px; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary); border-radius: 8px; font-size: 11px; cursor: pointer; }
+.btn-select-all.active { background: rgba(239,68,68,0.1); border-color: var(--accent); color: var(--accent); }
+.lang-grid { display: flex; flex-direction: column; gap: 8px; }
+.lang-option { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-secondary); border: 2px solid transparent; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.3s; }
+.lang-option:hover { background: var(--bg-card-hover); }
+.lang-option.selected { border-color: var(--accent); background: var(--accent-glow); }
+.lang-option input[type="checkbox"] { display: none; }
+.checkmark { width: 20px; height: 20px; border: 2px solid var(--border); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: transparent; transition: all 0.3s; }
+.lang-option.selected .checkmark { background: var(--accent); border-color: var(--accent); color: white; }
+.lang-flag { font-size: 24px; }
+.lang-info { flex: 1; }
+.lang-name { font-size: 13px; font-weight: 500; }
+.lang-code { font-size: 11px; color: var(--text-muted); }
+.lang-status { font-size: 11px; color: var(--text-muted); }
+.selected-count { text-align: center; margin-top: 10px; font-size: 12px; color: var(--text-secondary); }
+.selected-count .count { color: var(--accent); font-weight: 700; }
+.btn-primary { width: 100%; padding: 14px; background: linear-gradient(135deg, var(--accent), var(--accent-secondary)); border: none; border-radius: var(--radius-sm); color: white; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 16px; transition: all 0.3s; letter-spacing: 0.5px; }
+.btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(239,68,68,0.3); }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.error-msg { display: none; padding: 10px 14px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; color: #ef4444; font-size: 12px; margin-top: 12px; }
+.error-msg.show { display: block; }
+.progress-section { display: none; }
+.progress-section.show { display: block; }
+.progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.status-text { font-size: 13px; font-weight: 500; }
+.percent { font-size: 13px; font-weight: 700; color: var(--accent); }
+.progress-bar { height: 6px; background: var(--bg-secondary); border-radius: 3px; overflow: hidden; margin-bottom: 12px; }
+.progress-bar .fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-secondary)); border-radius: 3px; transition: width 0.5s ease; width: 0%; }
+.status-message { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+.btn-stop { margin-left: auto; padding: 4px 10px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #ef4444; border-radius: 6px; font-size: 11px; cursor: pointer; }
+.btn-reset { padding: 8px 16px; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary); border-radius: 8px; font-size: 12px; cursor: pointer; }
+.translate-progress-list { margin-top: 12px; }
+.translate-progress-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+.tp-flag { font-size: 16px; }
+.tp-label { font-size: 12px; width: 80px; color: var(--text-secondary); }
+.tp-bar { flex: 1; height: 4px; background: var(--bg-secondary); border-radius: 2px; overflow: hidden; }
+.tp-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #6366f1); border-radius: 2px; transition: width 0.5s; }
+.tp-percent { font-size: 11px; color: var(--text-muted); width: 32px; text-align: right; }
+.result-section { display: none; }
+.result-section.show { display: block; }
+.result-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+.result-stats .stat { text-align: center; padding: 10px 4px; background: var(--bg-secondary); border-radius: var(--radius-sm); }
+.result-stats .value { font-size: 18px; font-weight: 700; color: var(--accent); }
+.result-stats .label { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+.srt-tabs { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
+.srt-tab { padding: 6px 12px; background: var(--bg-secondary); border: 1px solid transparent; border-radius: 8px; color: var(--text-secondary); font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+.srt-tab.active { border-color: var(--accent); color: var(--text-primary); background: var(--accent-glow); }
+.srt-tab.error { opacity: 0.5; }
+.srt-preview { background: var(--bg-secondary); border-radius: var(--radius-sm); padding: 12px; font-size: 11px; font-family: 'Fira Code', monospace; color: var(--text-secondary); max-height: 200px; overflow-y: auto; white-space: pre-wrap; line-height: 1.5; margin-bottom: 12px; }
+.download-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.btn-download { display: inline-flex; align-items: center; gap: 6px; padding: 10px 16px; background: linear-gradient(135deg, var(--accent), var(--accent-secondary)); color: white; border-radius: var(--radius-sm); font-size: 12px; font-weight: 600; text-decoration: none; transition: all 0.3s; }
+.btn-download.secondary { background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); }
+.btn-download:hover { transform: translateY(-1px); }
+.tts-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.btn-tts { padding: 6px 12px; background: rgba(59,130,246,0.1); border: 1px solid #3b82f6; color: #3b82f6; border-radius: 8px; font-size: 11px; cursor: pointer; transition: all 0.3s; }
+.btn-tts:disabled { opacity: 0.5; cursor: wait; }
+.btn-tts.done { background: rgba(34,197,94,0.1); border-color: #22c55e; color: #22c55e; }
+.tts-progress { font-size: 10px; color: var(--text-muted); }
+.footer { text-align: center; padding: 20px 0; font-size: 11px; color: var(--text-muted); }
+.footer a { color: var(--accent); text-decoration: none; }
+/* Hardsub Gemini */
+.gemini-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.gemini-key-row { display: flex; gap: 8px; align-items: center; }
+.gemini-key-input { flex: 1; padding: 10px 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 12px; font-family: monospace; outline: none; }
+.gemini-key-input:focus { border-color: #8b5cf6; }
+.gemini-key-input::placeholder { color: var(--text-muted); }
+.btn-save-key { padding: 10px 14px; background: rgba(139,92,246,0.15); border: 1px solid #8b5cf6; color: #8b5cf6; border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap; transition: all 0.3s; }
+.btn-save-key:hover { background: rgba(139,92,246,0.25); }
+.btn-save-key.saved { background: rgba(34,197,94,0.1); border-color: #22c55e; color: #22c55e; }
+.key-status { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+.key-status.ok { color: #22c55e; }
+.gemini-model-row { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
+.gemini-model-row label { font-size: 13px; font-weight: 500; }
+.gemini-model-row small { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.gemini-model-row select { padding: 8px 12px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 12px; max-width: 240px; }
+.hardsub-badge { display: inline-block; padding: 3px 8px; background: rgba(139,92,246,0.15); color: #a78bfa; border-radius: 6px; font-size: 10px; font-weight: 600; }
+
+    </style>
+</head>
+<body>
+    <div class="bg-animation"></div>
+    <div class="container">
+        <div class="header">
+            <button class="btn-exit" onclick="exitApp()">⏻ Thoát ứng dụng</button>
+            <div class="header-icon">🎬</div>
+            <h1>Chinese SRT Extractor &amp; Translator</h1>
+            <p>Trích xuất &amp; dịch phụ đề .srt từ video tiếng Trung bằng AI</p>
+            <div class="device-badge cpu" id="deviceBadge">⏳ Đang kiểm tra...</div>
+        </div>
+        <div class="card" id="uploadCard">
+            <div class="input-tabs">
+                <button class="input-tab active" onclick="switchInputMode('file')">📂 Tải file lên</button>
+                <button class="input-tab" onclick="switchInputMode('url')">🔗 Dán link</button>
+                <button class="input-tab" onclick="switchInputMode('hardsub')">🔍 Trích Hardsub</button>
+            </div>
+            <div class="input-panel active" id="panelFile">
+                <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                    <div class="icon">📁</div>
+                    <h3>Kéo thả hoặc nhấn để chọn video</h3>
+                    <p>Hỗ trợ: MP4, MKV, AVI, MOV, WEBM (tối đa 2GB)</p>
+                    <input type="file" id="fileInput" accept=".mp4,.mkv,.avi,.mov,.webm,video/*">
+                </div>
+            </div>
+            <div class="input-panel" id="panelUrl">
+                <div class="url-input-group">
+                    <input type="text" class="url-input" id="urlInput" placeholder="Dán link video vào đây... (YouTube, Bilibili, Douyin, TikTok...)">
+                    <button class="btn-paste" onclick="pasteUrl()">📋 Dán</button>
+                </div>
+                <div class="url-platforms">
+                    <span class="platform-tag">YouTube</span>
+                    <span class="platform-tag">Bilibili</span>
+                    <span class="platform-tag">Douyin</span>
+                    <span class="platform-tag">TikTok</span>
+                    <span class="platform-tag">1000+ sites</span>
+                </div>
+                <div class="url-ready" id="urlReady">
+                    <span>✅</span>
+                    <span class="url-title" id="urlTitle">-</span>
+                </div>
+            </div>
+            <div class="input-panel" id="panelHardsub">
+                <div style="margin-bottom:12px;">
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                        <span style="font-size:20px;">🔑</span>
+                        <div><div style="font-size:13px; font-weight:600;">Gemini API Key</div><div style="font-size:11px; color:var(--text-muted);">Lấy key tại <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#8b5cf6;">aistudio.google.com</a></div></div>
+                    </div>
+                    <div class="gemini-key-row">
+                        <input type="password" class="gemini-key-input" id="geminiKeyInput" placeholder="AIza..." autocomplete="off">
+                        <button class="btn-save-key" id="btnSaveKey" onclick="saveGeminiKey()">💾 Lưu</button>
+                        <button style="padding:10px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;color:var(--text-muted);font-size:14px;" onclick="toggleKeyVisibility()" title="Hiện/ẩn key">👁️</button>
+                    </div>
+                    <div class="key-status" id="keyStatus">Đang kiểm tra...</div>
+                </div>
+                <div class="gemini-model-row">
+                    <div>
+                        <label>🤖 Gemini Model</label>
+                        <small>Model mạnh hơn = chính xác hơn nhưng tốn token hơn</small>
+                    </div>
+                    <select id="geminiModel"></select>
+                </div>
+                <div class="upload-zone" style="margin-top:14px;" id="hardsubUploadZone" onclick="document.getElementById('hardsubFileInput').click()">
+                    <div class="icon">🔍</div>
+                    <h3>Chọn video có phụ đề cứng (hardsub)</h3>
+                    <p>Gemini AI sẽ đọc text trên video và tạo file .srt</p>
+                    <input type="file" id="hardsubFileInput" accept=".mp4,.mkv,.avi,.mov,.webm,video/*" style="display:none;">
+                </div>
+                <div class="file-info" id="hardsubFileInfo">
+                    <div class="file-icon">🎥</div>
+                    <div class="file-details">
+                        <div class="file-name" id="hardsubFileName"></div>
+                        <div class="file-size" id="hardsubFileSize"></div>
+                    </div>
+                    <button class="remove-btn" onclick="removeHardsubFile()" title="Xóa">✕</button>
+                </div>
+            </div>
+            <div class="file-info" id="fileInfo">
+                <div class="file-icon">🎥</div>
+                <div class="file-details">
+                    <div class="file-name" id="fileName"></div>
+                    <div class="file-size" id="fileSize"></div>
+                </div>
+                <button class="remove-btn" onclick="removeFile()" title="Xóa">✕</button>
+            </div>
+            <div class="setting-row">
+                <div>
+                    <label>Model AI</label>
+                    <small>Model lớn hơn = chính xác hơn nhưng chậm hơn</small>
+                </div>
+                <select id="modelSize">
+                    <option value="large-v3-turbo" selected>Large V3 Turbo ⚡ (Khuyên dùng - Siêu nhanh &amp; Chính xác)</option>
+                    <option value="large-v3">Large V3 🧠 (Chính xác tuyệt đối - Đa dạng chất giọng)</option>
+                    <option value="large-v2">Large V2 🛡️ (Ổn định cao - Chống lặp từ khi có nhạc nền)</option>
+                    <option value="large-v1">Large V1 📦 (Bản Large tiêu chuẩn)</option>
+                </select>
+            </div>
+            <div class="lang-section">
+                <div class="lang-header">
+                    <div class="left">
+                        <h4>🌍 Dịch phụ đề sang</h4>
+                        <p>Chọn ngôn ngữ bạn muốn dịch (có thể chọn nhiều)</p>
+                    </div>
+                    <button class="btn-select-all" id="btnSelectAll" onclick="toggleSelectAll()">Chọn tất cả</button>
+                </div>
+                <div class="lang-grid">
+                    <label class="lang-option" data-lang="vi" onclick="toggleLang(this, 'vi')">
+                        <input type="checkbox" name="lang" value="vi">
+                        <div class="checkmark">✓</div>
+                        <span class="lang-flag">🇻🇳</span>
+                        <div class="lang-info"><div class="lang-name">Tiếng Việt</div><div class="lang-code">Vietnamese • vi</div></div>
+                        <span class="lang-status">Chưa chọn</span>
+                    </label>
+                    <label class="lang-option" data-lang="en" onclick="toggleLang(this, 'en')">
+                        <input type="checkbox" name="lang" value="en">
+                        <div class="checkmark">✓</div>
+                        <span class="lang-flag">🇺🇸</span>
+                        <div class="lang-info"><div class="lang-name">English</div><div class="lang-code">English • en</div></div>
+                        <span class="lang-status">Chưa chọn</span>
+                    </label>
+                    <label class="lang-option" data-lang="id" onclick="toggleLang(this, 'id')">
+                        <input type="checkbox" name="lang" value="id">
+                        <div class="checkmark">✓</div>
+                        <span class="lang-flag">🇮🇩</span>
+                        <div class="lang-info"><div class="lang-name">Bahasa Indonesia</div><div class="lang-code">Indonesian • id</div></div>
+                        <span class="lang-status">Chưa chọn</span>
+                    </label>
+                </div>
+                <div class="selected-count" id="selectedCount">Đã chọn: <span class="count">0</span> ngôn ngữ</div>
+            </div>
+            <div class="lang-section" style="margin-top: 12px;">
+                <div class="lang-header">
+                    <div class="left">
+                        <h4>🤖 Phương pháp dịch</h4>
+                        <p>AI dịch hay hơn, Google Translate nhanh hơn</p>
+                    </div>
+                </div>
+                <div style="display:flex; gap:8px; margin-top:8px;">
+                    <label style="flex:1; display:flex; align-items:center; gap:10px; padding:12px 16px; background:rgba(139,92,246,0.1); border:2px solid #8b5cf6; border-radius:10px; cursor:pointer;" id="methodAI" onclick="setTranslateMethod('ai')">
+                        <input type="radio" name="translate_method" value="ai" checked style="display:none;">
+                        <span style="font-size:20px;">🤖</span>
+                        <div><div style="font-size:13px; font-weight:600;">AI (9Router)</div><div style="font-size:11px; color:var(--text-muted);">Chất lượng cao, tự nhiên</div></div>
+                    </label>
+                    <label style="flex:1; display:flex; align-items:center; gap:10px; padding:12px 16px; background:rgba(255,255,255,0.03); border:2px solid var(--border); border-radius:10px; cursor:pointer;" id="methodGoogle" onclick="setTranslateMethod('google')">
+                        <input type="radio" name="translate_method" value="google" style="display:none;">
+                        <span style="font-size:20px;">🌍</span>
+                        <div><div style="font-size:13px; font-weight:600;">Google Translate</div><div style="font-size:11px; color:var(--text-muted);">Nhanh, miễn phí</div></div>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="lang-section" style="margin-top: 12px;">
+                <div class="lang-header">
+                    <div class="left">
+                        <h4>🎙️ Engine TTS (Giọng đọc)</h4>
+                        <p>Chọn hệ thống tạo giọng đọc cho phụ đề</p>
+                    </div>
+                </div>
+                <div style="display:flex; gap:8px; margin-top:8px;">
+                    <label style="flex:1; display:flex; align-items:center; gap:10px; padding:12px 16px; background:rgba(59,130,246,0.1); border:2px solid #3b82f6; border-radius:10px; cursor:pointer;" id="ttsEdge" onclick="setTTSEngine('edge')">
+                        <input type="radio" name="tts_engine" value="edge" checked style="display:none;">
+                        <span style="font-size:20px;">⚡</span>
+                        <div><div style="font-size:13px; font-weight:600;">Edge-TTS</div><div style="font-size:11px; color:var(--text-muted);">Nhanh, nhẹ, mặc định</div></div>
+                    </label>
+                    <label style="flex:1; display:flex; align-items:center; gap:10px; padding:12px 16px; background:rgba(255,255,255,0.03); border:2px solid var(--border); border-radius:10px; cursor:pointer;" id="ttsOmni" onclick="setTTSEngine('omnivoice')">
+                        <input type="radio" name="tts_engine" value="omnivoice" style="display:none;">
+                        <span style="font-size:20px;">🎤</span>
+                        <div><div style="font-size:13px; font-weight:600;">OmniVoice</div><div style="font-size:11px; color:var(--text-muted);">Clone giọng (chậm hơn)</div></div>
+                    </label>
+                    <label style="flex:1; display:flex; align-items:center; gap:10px; padding:12px 16px; background:rgba(255,255,255,0.03); border:2px solid var(--border); border-radius:10px; cursor:pointer;" id="ttsGemini" onclick="setTTSEngine('gemini')">
+                        <input type="radio" name="tts_engine" value="gemini" style="display:none;">
+                        <span style="font-size:20px;">✨</span>
+                        <div><div style="font-size:13px; font-weight:600;">Gemini TTS</div><div style="font-size:11px; color:var(--text-muted);">Biểu cảm, điện ảnh</div></div>
+                    </label>
+                </div>
+                <div id="geminiTTSOptions" style="display:none; margin-top:10px; padding:12px; background:rgba(139,92,246,0.08); border:1px solid rgba(139,92,246,0.35); border-radius:10px;">
+                    <div id="geminiTTSHealth" style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">Đang kiểm tra cấu hình Gemini TTS...</div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <label style="flex:1; min-width:140px; font-size:11px; color:var(--text-secondary);">Giọng đọc
+                            <select id="geminiTTSVoice" style="width:100%; margin-top:4px; padding:8px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:7px;">
+                                <option value="Charon">Charon — trầm, kể chuyện</option>
+                                <option value="Kore">Kore — rõ, ấm</option>
+                                <option value="Puck">Puck — trẻ, năng lượng</option>
+                                <option value="Aoede">Aoede — mềm, tự nhiên</option>
+                            </select>
+                        </label>
+                        <label style="flex:1; min-width:140px; font-size:11px; color:var(--text-secondary);">Cảm xúc
+                            <select id="geminiTTSEmotion" style="width:100%; margin-top:4px; padding:8px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:7px;">
+                                <option value="warm">Ấm áp</option>
+                                <option value="neutral">Tự nhiên</option>
+                                <option value="dramatic">Kịch tính</option>
+                                <option value="energetic">Năng lượng</option>
+                                <option value="intimate">Thân mật</option>
+                                <option value="solemn">Trang nghiêm</option>
+                                <option value="suspense">Hồi hộp</option>
+                            </select>
+                        </label>
+                    </div>
+                    <label style="display:block; margin-top:8px; font-size:11px; color:var(--text-secondary);">Chỉ dẫn thêm (không bắt buộc)
+                        <input id="geminiTTSStyle" maxlength="500" placeholder="Ví dụ: Đọc chậm rãi, nhấn mạnh câu kết..." style="width:100%; margin-top:4px; padding:8px; background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:7px;">
+                    </label>
+                </div>
+            </div>
+            <button class="btn-primary" id="startBtn" onclick="startExtraction()" disabled>🚀 Bắt đầu trích xuất phụ đề</button>
+            <button class="btn-primary" id="startHardsubBtn" onclick="startHardsub()" disabled style="display:none; background:linear-gradient(135deg, #8b5cf6, #6366f1);">🔍 Bắt đầu trích hardsub (Gemini)</button>
+            <div class="error-msg" id="errorMsg"></div>
+        </div>
+        <div class="card progress-section" id="progressSection">
+            <div class="progress-header"><span class="status-text" id="statusText">Đang xử lý...</span><span class="percent" id="progressPercent">0%</span></div>
+            <div class="progress-bar"><div class="fill" id="progressFill"></div></div>
+            <div class="status-message"><span class="status-icon">⚙️</span><span id="statusMessage">Đang chuẩn bị...</span><button class="btn-reset btn-stop" onclick="stopJob()">🛑 Hủy</button></div>
+            <div class="translate-progress-list" id="translateProgressList"></div>
+        </div>
+        <div class="card result-section" id="resultSection">
+            <h3 style="margin-bottom:16px; font-size:16px;">✅ Trích xuất &amp; dịch thành công!</h3>
+            <div class="result-stats">
+                <div class="stat"><div class="value" id="segmentCount">0</div><div class="label">Câu phụ đề</div></div>
+                <div class="stat"><div class="value" id="videoDuration">0:00</div><div class="label">Thời lượng</div></div>
+                <div class="stat"><div class="value" id="totalTime">0s</div><div class="label">Tổng thời gian</div></div>
+                <div class="stat"><div class="value" id="processSpeed">0x</div><div class="label">Tốc độ xử lý</div></div>
+            </div>
+            <h4 style="font-size:13px; color:var(--text-secondary); margin-bottom:8px;">Xem trước nội dung:</h4>
+            <div class="srt-tabs" id="srtTabs"></div>
+            <div class="srt-preview" id="srtPreview"></div>
+            <div class="download-row" id="downloadRow"></div>
+            <div class="tts-row" id="ttsRow"></div>
+            <div class="tts-row" id="burnSubRow" style="margin-top:6px;"></div>
+        </div>
+        <div class="footer"><p>Powered by <a href="https://github.com/SYSTRAN/faster-whisper">faster-whisper</a> + <a href="https://github.com/nidhaloff/deep-translator">deep-translator</a> • Built with ❤️</p></div>
+    </div>
+
+
+    <script>
+        let selectedFile = null;
+        let currentJobId = null;
+        let pollInterval = null;
+        let selectedLangs = new Set();
+        let resultData = null;
+        let translateMethod = 'ai';
+        let ttsEngine = 'edge';
+        let geminiTTSHealthLoaded = false;
+
+        function stopJob() {
+            if (!currentJobId) return;
+if (!confirm("Bạn có chắc chắn muốn dừng quá trình này không?")) return;
+            fetch('/api/stop/' + currentJobId, { method: 'POST' });
+document.getElementById('statusMessage').textContent = '🛑 Đang dừng...';
+            document.querySelector('.btn-stop').disabled = true;
+        }
+
+        function exitApp() {
+if (confirm("Bạn có chắc chắn muốn thoát? Mọi tiến trình đang chạy sẽ bị hủy.")) {
+                fetch('/api/shutdown', { method: 'POST' })
+                    .then(() => {
+document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:center; justify-content:center; flex-direction:column; background:#0a0a0f; color:#fff;"><h2>Đã tắt ứng dụng</h2><p style="color:#888;">Bạn có thể đóng thẻ trình duyệt này.</p></div>';
+                    })
+        .catch(() => alert('Không thể tắt ứng dụng, vui lòng tự đóng cửa sổ terminal.'));
+            }
+        }
+
+// --- Translation Method Toggle ---
+        function setTranslateMethod(method) {
+            translateMethod = method;
+            const aiEl = document.getElementById('methodAI');
+            const googleEl = document.getElementById('methodGoogle');
+            if (method === 'ai') {
+                aiEl.style.background = 'rgba(139,92,246,0.1)';
+                aiEl.style.borderColor = '#8b5cf6';
+                googleEl.style.background = 'rgba(255,255,255,0.03)';
+                googleEl.style.borderColor = 'var(--border)';
+            } else {
+                googleEl.style.background = 'rgba(34,197,94,0.1)';
+                googleEl.style.borderColor = '#22c55e';
+                aiEl.style.background = 'rgba(255,255,255,0.03)';
+                aiEl.style.borderColor = 'var(--border)';
+            }
+        }
+
+// --- TTS Engine Toggle ---
+        async function setTTSEngine(engine) {
+            ttsEngine = engine;
+            const edgeEl = document.getElementById('ttsEdge');
+            const omniEl = document.getElementById('ttsOmni');
+            const geminiEl = document.getElementById('ttsGemini');
+            const optionsEl = document.getElementById('geminiTTSOptions');
+            [edgeEl, omniEl, geminiEl].forEach(el => {
+                el.style.background = 'rgba(255,255,255,0.03)';
+                el.style.borderColor = 'var(--border)';
+            });
+            if (engine === 'edge') {
+                edgeEl.style.background = 'rgba(59,130,246,0.1)';
+                edgeEl.style.borderColor = '#3b82f6';
+            } else if (engine === 'omnivoice') {
+                omniEl.style.background = 'rgba(239,68,68,0.1)';
+                omniEl.style.borderColor = '#ef4444';
+            } else {
+                geminiEl.style.background = 'rgba(139,92,246,0.12)';
+                geminiEl.style.borderColor = '#8b5cf6';
+            }
+            optionsEl.style.display = engine === 'gemini' ? 'block' : 'none';
+            if (engine === 'gemini' && !geminiTTSHealthLoaded) await loadGeminiTTSHealth();
+        }
+
+        async function loadGeminiTTSHealth() {
+            const el = document.getElementById('geminiTTSHealth');
+            try {
+                const resp = await fetch('/api/tts/health');
+                const health = await resp.json();
+                geminiTTSHealthLoaded = true;
+                if (health.configured) {
+                    el.textContent = `✅ Đã cấu hình • ${health.model} • ${health.voice}`;
+                    el.style.color = '#22c55e';
+                } else {
+                    el.textContent = '⚠️ Chưa có khóa. Nhập Gemini API Key ở chế độ Hardsub hoặc đặt GEMINI_API_KEY.';
+                    el.style.color = '#f59e0b';
+                }
+            } catch (_err) {
+                el.textContent = '⚠️ Không kiểm tra được trạng thái Gemini TTS.';
+                el.style.color = '#f59e0b';
+            }
+        }
+
+// --- Language Toggle ---
+        function toggleLang(el, code) {
+            el.classList.toggle('selected');
+            const cb = el.querySelector('input[type="checkbox"]');
+            const status = el.querySelector('.lang-status');
+            cb.checked = !cb.checked;
+            if (cb.checked) {
+                selectedLangs.add(code);
+                status.textContent = '✅ Đã chọn';
+            } else {
+                selectedLangs.delete(code);
+                status.textContent = 'Chưa chọn';
+            }
+            updateSelectedCount();
+        }
+
+        function toggleSelectAll() {
+            const allOptions = document.querySelectorAll('.lang-option');
+            const btn = document.getElementById('btnSelectAll');
+            const allSelected = selectedLangs.size === allOptions.length;
+            
+            allOptions.forEach(el => {
+                const code = el.dataset.lang;
+                const cb = el.querySelector('input[type="checkbox"]');
+                const status = el.querySelector('.lang-status');
+                if (allSelected) {
+                    el.classList.remove('selected');
+                    cb.checked = false;
+                    selectedLangs.delete(code);
+        status.textContent = 'Chưa chọn';
+                } else {
+                    el.classList.add('selected');
+                    cb.checked = true;
+                    selectedLangs.add(code);
+        status.textContent = '✅ Đã chọn';
+                }
+            });
+            btn.classList.toggle('active', !allSelected);
+    btn.textContent = allSelected ? 'Chọn tất cả' : 'Bỏ chọn tất cả';
+            updateSelectedCount();
+        }
+
+        function updateSelectedCount() {
+            const countEl = document.querySelector('#selectedCount .count');
+            countEl.textContent = selectedLangs.size;
+            const btn = document.getElementById('btnSelectAll');
+            const allOptions = document.querySelectorAll('.lang-option');
+            if (selectedLangs.size === allOptions.length) {
+                btn.classList.add('active');
+            btn.textContent = 'Bỏ chọn tất cả';
+            } else {
+                btn.classList.remove('active');
+            btn.textContent = 'Chọn tất cả';
+            }
+        }
+
+// --- Drag & Drop ---
+        const zone = document.getElementById('uploadZone');
+        zone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            zone.classList.add('dragover');
+        });
+        zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+        zone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            zone.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) handleFile(files[0]);
+        });
+
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            if (e.target.files.length > 0) handleFile(e.target.files[0]);
+        });
+
+        function handleFile(file) {
+            const validTypes = ['.mp4', '.mkv', '.avi', '.mov', '.webm'];
+            const ext = '.' + file.name.split('.').pop().toLowerCase();
+            if (!validTypes.includes(ext)) {
+        showError('Định dạng không hỗ trợ. Vui lòng chọn file MP4, MKV, AVI, MOV hoặc WEBM.');
+                return;
+            }
+            selectedFile = file;
+            document.getElementById('fileName').textContent = file.name;
+            document.getElementById('fileSize').textContent = formatFileSize(file.size);
+            document.getElementById('fileInfo').classList.add('show');
+            document.getElementById('startBtn').disabled = false;
+            hideError();
+        }
+
+        function removeFile() {
+            selectedFile = null;
+            document.getElementById('fileInput').value = '';
+            document.getElementById('fileInfo').classList.remove('show');
+            document.getElementById('startBtn').disabled = true;
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+            return (bytes / 1073741824).toFixed(2) + ' GB';
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('errorMsg');
+        el.textContent = '❌ ' + msg;
+            el.classList.add('show');
+        }
+        function hideError() {
+            document.getElementById('errorMsg').classList.remove('show');
+        }
+
+// --- Upload & Start ---
+        async function startExtraction() {
+            document.getElementById('startBtn').disabled = true;
+            
+            try {
+                let res, data;
+                
+                if (inputMode === 'url') {
+                    // URL mode
+                    const url = document.getElementById('urlInput').value.trim();
+                    if (!url) return;
+                    
+    document.getElementById('startBtn').textContent = '⏳ Đang gửi yêu cầu...';
+                    
+                    res = await fetch('/api/url', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            url: url,
+                            model_size: document.getElementById('modelSize').value,
+                            translate_langs: [...selectedLangs],
+                            translate_method: translateMethod,
+                        })
+                    });
+                } else {
+                    // File mode
+                    if (!selectedFile) return;
+                    
+    document.getElementById('startBtn').textContent = '⏳ Đang tải lên...';
+                    
+                    const formData = new FormData();
+                    formData.append('video', selectedFile);
+                    formData.append('model_size', document.getElementById('modelSize').value);
+                    formData.append('translate_langs', JSON.stringify([...selectedLangs]));
+                    formData.append('translate_method', translateMethod);
+                    
+                    res = await fetch('/api/upload', { method: 'POST', body: formData });
+                }
+                
+                data = await res.json();
+
+                if (!res.ok) {
+                    showError(data.error || 'Thất bại');
+                    document.getElementById('startBtn').disabled = false;
+        document.getElementById('startBtn').textContent = '🚀 Bắt đầu trích xuất phụ đề';
+                    return;
+                }
+
+                currentJobId = data.job_id;
+                document.getElementById('uploadCard').style.display = 'none';
+                document.getElementById('progressSection').classList.add('show');
+                
+                // Start polling
+                pollInterval = setInterval(pollStatus, 1500);
+                
+            } catch (err) {
+        showError('Lỗi kết nối: ' + err.message);
+                document.getElementById('startBtn').disabled = false;
+        document.getElementById('startBtn').textContent = '🚀 Bắt đầu trích xuất phụ đề';
+            }
+        }
+
+        const langMeta = {
+            zh: { name: '中文 (原文)', flag: '🇨🇳' },
+            vi: { name: 'Tiếng Việt', flag: '🇻🇳' },
+            en: { name: 'English', flag: '🇺🇸' },
+            id: { name: 'Indonesia', flag: '🇮🇩' },
+        };
+
+        async function pollStatus() {
+            if (!currentJobId) return;
+            try {
+                const res = await fetch('/api/status/' + currentJobId);
+                const data = await res.json();
+
+                document.getElementById('progressFill').style.width = data.progress + '%';
+                document.getElementById('progressPercent').textContent = data.progress + '%';
+                document.getElementById('statusMessage').textContent = data.message;
+
+                if (data.status === 'downloading_video') {
+                document.getElementById('statusText').textContent = '⬇️ Đang tải video từ URL...';
+                    document.getElementById('progressFill').style.background = 'linear-gradient(90deg, #8b5cf6, #6366f1)';
+                } else if (data.status === 'extracting_audio') {
+                document.getElementById('statusText').textContent = '🎵 Đang tách audio từ video...';
+                    document.getElementById('progressFill').style.background = 'linear-gradient(90deg, #f59e0b, #f97316)';;
+                } else if (data.status === 'loading_model') {
+                document.getElementById('statusText').textContent = '🧠 Đang tải AI Model...';
+                    document.getElementById('progressFill').style.background = 'linear-gradient(90deg, var(--accent), var(--accent-secondary))';
+                } else if (data.status === 'transcribing') {
+                document.getElementById('statusText').textContent = '🎤 Đang nhận dạng giọng nói...';
+                } else if (data.status === 'generating') {
+                document.getElementById('statusText').textContent = '📜 Đang tạo phụ đề...';
+                } else if (data.status === 'translating') {
+                document.getElementById('statusText').textContent = '🌍 Đang dịch phụ đề...';
+                    document.getElementById('progressFill').style.background = 'linear-gradient(90deg, #3b82f6, #6366f1)';
+                    
+                    // Show translate progress bars
+                    if (data.translate_progress) {
+                        let html = '';
+                        for (const [lang, progress] of Object.entries(data.translate_progress)) {
+                            const meta = langMeta[lang] || { flag: '🏳️', name: lang };
+                            html += `
+                                <div class="translate-progress-item">
+                                    <span class="tp-flag">${meta.flag}</span>
+                                    <span class="tp-label">${meta.name}</span>
+                                    <div class="tp-bar"><div class="tp-fill" style="width: ${progress}%"></div></div>
+                                    <span class="tp-percent">${progress}%</span>
+                                </div>
+                            `;
+                        }
+                        document.getElementById('translateProgressList').innerHTML = html;
+                    }
+                } else if (data.status === 'uploading_video') {
+                document.getElementById('statusText').textContent = '⬆️ Đang tải video lên Gemini...';
+                    document.getElementById('progressFill').style.background = 'linear-gradient(90deg, #8b5cf6, #a78bfa)';
+                } else if (data.status === 'processing_video') {
+                document.getElementById('statusText').textContent = '⚙️ Gemini đang xử lý video...';
+                    document.getElementById('progressFill').style.background = 'linear-gradient(90deg, #8b5cf6, #6366f1)';
+                } else if (data.status === 'extracting_hardsub') {
+                document.getElementById('statusText').textContent = '🔍 Đang trích xuất hardsub...';
+                    document.getElementById('progressFill').style.background = 'linear-gradient(90deg, #a78bfa, #8b5cf6)';
+                }
+
+                if (data.status === 'done') {
+                    clearInterval(pollInterval);
+                    showResult(data);
+                } else if (data.status === 'error') {
+                    clearInterval(pollInterval);
+                    document.getElementById('progressSection').classList.remove('show');
+                    document.getElementById('uploadCard').style.display = 'block';
+                    showError(data.message);
+                    if (inputMode === 'hardsub') {
+                        document.getElementById('startHardsubBtn').disabled = false;
+                        document.getElementById('startHardsubBtn').textContent = '🔍 Bắt đầu trích hardsub (Gemini)';
+                    } else {
+                        document.getElementById('startBtn').disabled = false;
+                        document.getElementById('startBtn').textContent = '🚀 Bắt đầu trích xuất phụ đề';
+                    }
+                }
+            } catch (err) {
+                console.error('Poll error:', err);
+            }
+        }
+
+        function showResult(data) {
+            resultData = data;
+            document.getElementById('progressSection').classList.remove('show');
+            document.getElementById('resultSection').classList.add('show');
+
+            document.getElementById('segmentCount').textContent = data.segment_count;
+            
+            const dur = data.duration || 0;
+            const mins = Math.floor(dur / 60);
+            const secs = Math.floor(dur % 60);
+            document.getElementById('videoDuration').textContent = mins + ':' + String(secs).padStart(2, '0');
+            
+            // Total time
+            const totalTime = data.total_time || 0;
+            if (totalTime >= 60) {
+                document.getElementById('totalTime').textContent = Math.floor(totalTime / 60) + 'm' + Math.floor(totalTime % 60) + 's';
+            } else {
+                document.getElementById('totalTime').textContent = Math.round(totalTime) + 's';
+            }
+            
+            // Processing speed (audio duration / transcribe time)
+            const transcribeTime = data.transcribe_time || 1;
+            const speed = dur / transcribeTime;
+            document.getElementById('processSpeed').textContent = speed.toFixed(1) + 'x';
+
+            // Build tabs and download buttons
+            const srtFiles = data.srt_files || {};
+            const tabContainer = document.getElementById('srtTabs');
+            const downloadRow = document.getElementById('downloadRow');
+            let tabsHtml = '';
+            let downloadsHtml = '';
+            let firstLang = null;
+
+            for (const [lang, info] of Object.entries(srtFiles)) {
+                if (!firstLang) firstLang = lang;
+                const hasError = !!info.error;
+                const meta = langMeta[lang] || { flag: info.flag || '🏳️', name: info.lang_name || lang };
+                
+                tabsHtml += `
+                    <button class="srt-tab ${!hasError && lang === firstLang ? 'active' : ''} ${hasError ? 'error' : ''}"
+                            onclick="switchTab('${lang}')" data-lang="${lang}">
+                        <span class="tab-flag">${meta.flag}</span>
+                ${meta.name} ${hasError ? '⚠️' : ''}
+                    </button>
+                `;
+                
+                if (!hasError) {
+                    const isZh = lang === 'zh';
+                    downloadsHtml += `
+                        <a class="btn-download ${isZh ? '' : 'secondary'}" 
+                           href="/api/download/${currentJobId}/${lang}">
+                    ⬇️ ${meta.flag} ${escapeHtml(info.filename)}
+                        </a>
+                    `;
+                }
+            }
+            
+        downloadsHtml += `<button class="btn-reset" onclick="resetAll()">🔄 Làm lại</button>`;
+
+            // Add video download button if available
+            if (data.video_file) {
+                const vf = data.video_file;
+                const sizeMB = (vf.size / 1048576).toFixed(1);
+                downloadsHtml = `
+                    <a class="btn-download" style="background: linear-gradient(135deg, #8b5cf6, #6366f1);" 
+                       href="/api/download-video/${currentJobId}">
+                        🎬 Tải video (${sizeMB}MB)
+                    </a>
+                ` + downloadsHtml;
+            }
+            
+            tabContainer.innerHTML = tabsHtml;
+            downloadRow.innerHTML = downloadsHtml;
+
+            // Build TTS buttons
+            const ttsRow = document.getElementById('ttsRow');
+            let ttsHtml = '<span style="font-size:12px; color:var(--text-muted); margin-right:6px;">🔊 Tạo audio TTS:</span>';
+            for (const [lang, info] of Object.entries(srtFiles)) {
+                if (info.error) continue;
+                const meta = langMeta[lang] || { flag: info.flag || '🏳️', name: info.lang_name || lang };
+                ttsHtml += `
+                    <button class="btn-tts" id="ttsBtn_${lang}" onclick="generateTTS('${lang}')">
+                        🔊 ${meta.flag} ${meta.name}
+                    </button>
+                `;
+            }
+            ttsRow.innerHTML = ttsHtml;
+
+            // Build Burn Sub buttons
+            const burnSubRow = document.getElementById('burnSubRow');
+        let burnHtml = '<span style="font-size:12px; color:var(--text-muted); margin-right:6px;">🎬 Burn sub vào video:</span>';
+            for (const [lang, info] of Object.entries(srtFiles)) {
+                if (info.error || lang === 'zh') continue;
+                const meta = langMeta[lang] || { flag: info.flag || '🏳️', name: info.lang_name || lang };
+                burnHtml += `
+                    <button class="btn-tts" id="burnBtn_${lang}" onclick="generateBurnSub('${lang}')" style="background:rgba(249,115,22,0.1); border-color:#f97316; color:#f97316;">
+                        🎬 ${meta.flag} ${meta.name}
+                    </button>
+                `;
+            }
+            burnSubRow.innerHTML = burnHtml;
+
+            // Show first preview
+            if (firstLang && srtFiles[firstLang]) {
+                document.getElementById('srtPreview').textContent = srtFiles[firstLang].preview || srtFiles[firstLang].error || '';
+            }
+        }
+
+        async function generateTTS(lang, isRetry = false) {
+            const btn = document.getElementById(`ttsBtn_${lang}`);
+            const retryBtn = document.getElementById(`ttsRetryBtn_${lang}`);
+            if (isRetry) {
+                if (retryBtn) { retryBtn.disabled = true; retryBtn.textContent = "⏳ Đang bù đoạn thiếu..."; }
+            } else {
+                if (btn) { btn.disabled = true; btn.textContent = "⏳ Đang tạo..."; }
+            }
+            
+            try {
+                const resp = await fetch(`/api/tts/${currentJobId}/${lang}`, { 
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        retry: isRetry,
+                        force: isRetry,
+                        engine: ttsEngine,
+                        voice: document.getElementById("geminiTTSVoice").value,
+                        emotion: document.getElementById("geminiTTSEmotion").value,
+                        style_prompt: document.getElementById("geminiTTSStyle").value
+                    })
+                });
+                const data = await resp.json();
+                
+                if (data.error) {
+                    if (isRetry && retryBtn) { retryBtn.textContent = `❌ ${data.error}`; retryBtn.disabled = false; }
+                    else if (btn) { btn.textContent = `❌ ${data.error}`; btn.disabled = false; }
+                    return;
+                }
+                
+                pollTTS(lang);
+            } catch (err) {
+                if (isRetry && retryBtn) { retryBtn.textContent = `❌ Lỗi`; retryBtn.disabled = false; }
+                else if (btn) { btn.textContent = `❌ Lỗi`; btn.disabled = false; }
+            }
+        }
+
+        function pollTTS(lang) {
+            const btn = document.getElementById(`ttsBtn_${lang}`);
+            
+            const interval = setInterval(async () => {
+                try {
+                    const resp = await fetch(`/api/status/${currentJobId}`);
+                    const data = await resp.json();
+                    const tts = data[`tts_${lang}`];
+                    
+                    if (!tts) return;
+                    
+                    const retryBtn = document.getElementById(`ttsRetryBtn_${lang}`);
+                    if (tts.status === "generating") {
+                        btn.textContent = `⏳ ${tts.progress}% ${tts.message}`;
+                        if (retryBtn) retryBtn.style.display = "none";
+                    } else if (tts.status === "done" || tts.status === "partial") {
+                        clearInterval(interval);
+                        const sizeMB = (tts.size / 1048576).toFixed(1);
+                        btn.className = "btn-tts done";
+                        btn.disabled = false;
+                        const failedCount = (tts.failed_segments || []).length;
+                        if (tts.status === "partial" && failedCount > 0) {
+                            btn.innerHTML = `📥 Tải audio (${sizeMB}MB • thiếu ${failedCount} đoạn)`;
+                            btn.onclick = () => window.location.href = `/api/download-audio/${currentJobId}/${lang}`;
+                            
+                            let rBtn = document.getElementById(`ttsRetryBtn_${lang}`);
+                            if (!rBtn) {
+                                rBtn = document.createElement("button");
+                                rBtn.id = `ttsRetryBtn_${lang}`;
+                                rBtn.className = "btn-tts";
+                                rBtn.style.cssText = "background:rgba(249,115,22,0.15); border-color:#f97316; color:#f97316; margin-left:6px;";
+                                btn.parentNode.insertBefore(rBtn, btn.nextSibling);
+                            }
+                            rBtn.style.display = "inline-block";
+                            rBtn.disabled = false;
+                            rBtn.innerHTML = `🔄 Bù ${failedCount} đoạn thiếu`;
+                            rBtn.onclick = () => generateTTS(lang, true);
+                        } else {
+                            btn.innerHTML = `📥 Tải audio (${sizeMB}MB)`;
+                            btn.onclick = () => window.location.href = `/api/download-audio/${currentJobId}/${lang}`;
+                            if (retryBtn) retryBtn.remove();
+                        }
+                    } else if (tts.status === "error") {
+                        clearInterval(interval);
+                        btn.textContent = `❌ ${tts.message}`;
+                        btn.disabled = false;
+                        if (retryBtn) retryBtn.style.display = "none";
+                    }
+                } catch (err) {
+                    console.error("TTS poll error:", err);
+                }
+            }, 1500);
+        }
+
+// --- Multi-Region Burn Subtitle ---
+        let burnLang = '';
+        let subRegion = {x_ratio:0, y_ratio:0.78, w_ratio:1.0, h_ratio:0.18};
+        let extraRegions = [];
+        let activeRegionIdx = 0; // 0=sub, 1+=extra
+        let isDragging = false, dragType = '';
+        let presets = {};
+
+        async function loadPresets() {
+            try {
+                const resp = await fetch('/api/presets');
+                presets = await resp.json();
+                updatePresetDropdown();
+            } catch(e) { console.error('Load presets error:', e); }
+        }
+
+        function updatePresetDropdown() {
+            const sel = document.getElementById('presetSelect');
+            if (!sel) return;
+        sel.innerHTML = '<option value="">-- Chọn preset --</option>';
+            for (const [key, p] of Object.entries(presets)) {
+                sel.innerHTML += `<option value="${escapeHtml(key)}">${escapeHtml(p.name)}</option>`;
+            }
+        }
+
+        function applyPreset(key) {
+            if (!key || !presets[key]) return;
+            const p = presets[key];
+            subRegion = {...p.sub_region};
+            extraRegions = (p.extra_regions || []).map(r => ({...r}));
+            updateAllRegionOverlays();
+            updateRegionList();
+        }
+
+        function generateBurnSub(lang) {
+            burnLang = lang;
+            subRegion = {x_ratio:0, y_ratio:0.78, w_ratio:1.0, h_ratio:0.18};
+            extraRegions = [];
+            activeRegionIdx = 0;
+
+            const modal = document.getElementById('regionModal');
+            const img = document.getElementById('regionImg');
+            img.src = `/api/frame/${currentJobId}?t=${Date.now()}`;
+            img.onload = () => {
+                loadPresets();
+                updateAllRegionOverlays();
+                updateRegionList();
+            };
+            modal.style.display = 'flex';
+        }
+
+        function closeRegionModal() {
+            document.getElementById('regionModal').style.display = 'none';
+        }
+
+        function getAllRegions() {
+            return [subRegion, ...extraRegions];
+        }
+
+        function getRegion(idx) {
+            return idx === 0 ? subRegion : extraRegions[idx - 1];
+        }
+
+        function setRegion(idx, r) {
+            if (idx === 0) subRegion = r;
+            else extraRegions[idx - 1] = r;
+        }
+
+        function addExtraRegion() {
+    if (extraRegions.length >= 2) { alert('Tối đa 3 vùng (1 sub + 2 extra)'); return; }
+            extraRegions.push({x_ratio:0.65, y_ratio:0.01, w_ratio:0.30, h_ratio:0.06});
+            activeRegionIdx = extraRegions.length;
+            updateAllRegionOverlays();
+            updateRegionList();
+        }
+
+        function removeExtraRegion(idx) {
+            if (idx < 1) return;
+            extraRegions.splice(idx - 1, 1);
+            if (activeRegionIdx >= getAllRegions().length) activeRegionIdx = 0;
+            updateAllRegionOverlays();
+            updateRegionList();
+        }
+
+        function selectRegion(idx) {
+            activeRegionIdx = idx;
+            updateAllRegionOverlays();
+            updateRegionList();
+        }
+
+        function updateRegionList() {
+            const list = document.getElementById('regionList');
+            if (!list) return;
+            const all = getAllRegions();
+            let html = '';
+            all.forEach((r, i) => {
+                const active = i === activeRegionIdx;
+                const label = i === 0 ? '🎬 Sub' : `🟢 Extra ${i}`;
+                const pctY = Math.round(r.y_ratio * 100);
+                const pctH = Math.round(r.h_ratio * 100);
+                const pctX = Math.round(r.x_ratio * 100);
+                const pctW = Math.round(r.w_ratio * 100);
+                html += `<div onclick="selectRegion(${i})" style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:11px;
+                    ${active ? 'background:rgba(249,115,22,0.15);border:1px solid #f97316;' : 'background:rgba(255,255,255,0.05);border:1px solid transparent;'}">
+                    <span style="font-weight:600;${active ? 'color:#f97316' : 'color:#aaa'}">${label}</span>
+                    <span style="color:#888;font-size:10px">X${pctX}% Y${pctY}% W${pctW}% H${pctH}%</span>
+            ${i > 0 ? `<button onclick="event.stopPropagation();removeExtraRegion(${i})" style="margin-left:auto;background:none;border:none;color:#ef4444;cursor:pointer;font-size:13px">✕</button>` : ''}
+                </div>`;
+            });
+            list.innerHTML = html;
+        }
+
+        function updateAllRegionOverlays() {
+            const container = document.getElementById('regionContainer');
+            const img = document.getElementById('regionImg');
+            if (!img || !img.clientHeight) return;
+
+            const imgW = img.clientWidth;
+            const imgH = img.clientHeight;
+
+            // Remove old overlays
+            container.querySelectorAll('.region-box').forEach(el => el.remove());
+
+            const all = getAllRegions();
+            all.forEach((r, i) => {
+                const active = i === activeRegionIdx;
+                const box = document.createElement('div');
+                box.className = 'region-box';
+                box.dataset.idx = i;
+
+                const x = r.x_ratio * imgW;
+                const y = r.y_ratio * imgH;
+                const w = r.w_ratio * imgW;
+                const h = r.h_ratio * imgH;
+
+                const color = i === 0 ? '#f97316' : '#3b82f6';
+                const bg = i === 0 ? 'rgba(249,115,22,0.15)' : 'rgba(59,130,246,0.15)';
+
+                box.style.cssText = `position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;
+                    border:2px solid ${active ? color : color+'80'};background:${active ? bg : 'transparent'};
+                    box-sizing:border-box;cursor:move;z-index:${active ? 10 : 5};`;
+
+                if (active) {
+                    // Corner handles
+                    const handles = [
+                        {pos:'top:0;left:0;cursor:nw-resize', type:'tl'},
+                        {pos:'top:0;right:0;cursor:ne-resize', type:'tr'},
+                        {pos:'bottom:0;left:0;cursor:sw-resize', type:'bl'},
+                        {pos:'bottom:0;right:0;cursor:se-resize', type:'br'},
+                    ];
+                    handles.forEach(h => {
+                        const hdl = document.createElement('div');
+                        hdl.style.cssText = `position:absolute;${h.pos};width:10px;height:10px;background:${color};border-radius:2px;transform:translate(-3px,-3px);z-index:11;cursor:${h.type.includes('t')?'n':'s'}${h.type.includes('l')?'w':'e'}-resize;`;
+                        hdl.dataset.handle = h.type;
+                        box.appendChild(hdl);
+                    });
+
+                    // Label
+                    const lbl = document.createElement('div');
+                    lbl.style.cssText = `position:absolute;top:2px;left:4px;font-size:9px;color:${color};font-weight:700;pointer-events:none;text-shadow:0 1px 2px rgba(0,0,0,0.8);`;
+                    lbl.textContent = i === 0 ? 'SUB' : `EXTRA ${i}`;
+                    box.appendChild(lbl);
+                }
+
+                container.appendChild(box);
+            });
+
+            // Info text
+            const info = document.getElementById('regionInfo');
+            if (info) {
+                const r = getRegion(activeRegionIdx);
+                const label = activeRegionIdx === 0 ? 'Sub' : `Extra ${activeRegionIdx}`;
+                info.textContent = `${label}: X=${Math.round(r.x_ratio*100)}% Y=${Math.round(r.y_ratio*100)}% W=${Math.round(r.w_ratio*100)}% H=${Math.round(r.h_ratio*100)}%`;
+            }
+        }
+
+        // Drag handlers (supports both X and Y, resize from corners)
+        function initRegionDrag() {
+            const container = document.getElementById('regionContainer');
+
+            container.addEventListener('mousedown', (e) => {
+                const img = document.getElementById('regionImg');
+                const rect = img.getBoundingClientRect();
+                const mx = (e.clientX - rect.left) / rect.width;
+                const my = (e.clientY - rect.top) / rect.height;
+
+                // Check if clicking a handle
+                const handle = e.target.dataset?.handle;
+                if (handle) {
+                    isDragging = true;
+                    dragType = handle;
+                    container._dragRegion = {...getRegion(activeRegionIdx)};
+                    e.preventDefault();
+                    return;
+                }
+
+                // Check if clicking inside a region box
+                const box = e.target.closest('.region-box');
+                if (box) {
+                    const idx = parseInt(box.dataset.idx);
+                    activeRegionIdx = idx;
+                    isDragging = true;
+                    dragType = 'move';
+                    container._dragStart = {mx, my};
+                    container._dragRegion = {...getRegion(idx)};
+                    updateRegionList();
+                    e.preventDefault();
+                    return;
+                }
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                const img = document.getElementById('regionImg');
+                const rect = img.getBoundingClientRect();
+                const mx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                const my = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+                const r = container._dragRegion;
+                let nr = {...getRegion(activeRegionIdx)};
+
+                if (dragType === 'move') {
+                    const dx = mx - container._dragStart.mx;
+                    const dy = my - container._dragStart.my;
+                    nr.x_ratio = Math.max(0, Math.min(1 - r.w_ratio, r.x_ratio + dx));
+                    nr.y_ratio = Math.max(0, Math.min(1 - r.h_ratio, r.y_ratio + dy));
+                } else if (dragType === 'tl') {
+                    const right = r.x_ratio + r.w_ratio;
+                    const bottom = r.y_ratio + r.h_ratio;
+                    nr.x_ratio = Math.min(mx, right - 0.02);
+                    nr.y_ratio = Math.min(my, bottom - 0.02);
+                    nr.w_ratio = right - nr.x_ratio;
+                    nr.h_ratio = bottom - nr.y_ratio;
+                } else if (dragType === 'tr') {
+                    const bottom = r.y_ratio + r.h_ratio;
+                    nr.w_ratio = Math.max(0.02, mx - r.x_ratio);
+                    nr.y_ratio = Math.min(my, bottom - 0.02);
+                    nr.h_ratio = bottom - nr.y_ratio;
+                } else if (dragType === 'bl') {
+                    const right = r.x_ratio + r.w_ratio;
+                    nr.x_ratio = Math.min(mx, right - 0.02);
+                    nr.w_ratio = right - nr.x_ratio;
+                    nr.h_ratio = Math.max(0.02, my - r.y_ratio);
+                } else if (dragType === 'br') {
+                    nr.w_ratio = Math.max(0.02, mx - r.x_ratio);
+                    nr.h_ratio = Math.max(0.02, my - r.y_ratio);
+                }
+
+                // Clamp
+                nr.x_ratio = Math.max(0, nr.x_ratio);
+                nr.y_ratio = Math.max(0, nr.y_ratio);
+                nr.w_ratio = Math.min(nr.w_ratio, 1 - nr.x_ratio);
+                nr.h_ratio = Math.min(nr.h_ratio, 1 - nr.y_ratio);
+
+                setRegion(activeRegionIdx, nr);
+                updateAllRegionOverlays();
+                updateRegionList();
+            });
+
+            document.addEventListener('mouseup', () => { isDragging = false; });
+        }
+
+        async function saveCurrentPreset() {
+    const name = prompt('Tên preset:');
+            if (!name) return;
+            const key = name.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 30);
+            try {
+                await fetch('/api/presets', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        key, name,
+                        sub_region: subRegion,
+                        extra_regions: extraRegions,
+                    })
+                });
+                await loadPresets();
+            alert('Đã lưu preset: ' + name);
+        } catch(e) { alert('Lỗi lưu preset: ' + e); }
+        }
+
+        async function doBurnSub(mode) {
+            closeRegionModal();
+            const btn = document.getElementById(`burnBtn_${burnLang}`);
+            btn.disabled = true;
+    btn.innerHTML = `⏳ Đang burn sub...`;
+
+            const body = mode === 'manual'
+                ? { sub_region: subRegion, extra_regions: extraRegions }
+                : {};
+
+            try {
+                const resp = await fetch(`/api/burnsub/${currentJobId}/${burnLang}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await resp.json();
+
+                if (data.error) {
+            btn.textContent = `❌ ${data.error}`;
+                    btn.disabled = false;
+                    return;
+                }
+
+                pollBurnSub(burnLang);
+            } catch (err) {
+            btn.innerHTML = `❌ Lỗi`;
+                btn.disabled = false;
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', initRegionDrag);
+
+        function pollBurnSub(lang) {
+            const btn = document.getElementById(`burnBtn_${lang}`);
+
+            const interval = setInterval(async () => {
+                try {
+                    const resp = await fetch(`/api/status/${currentJobId}`);
+                    const data = await resp.json();
+                    const burn = data[`burn_${lang}`];
+
+                    if (!burn) return;
+
+                    if (burn.status === 'processing') {
+                btn.textContent = `⏳ ${burn.progress}% ${burn.message}`;
+                    } else if (burn.status === 'done') {
+                        clearInterval(interval);
+                        const sizeMB = (burn.size / 1048576).toFixed(1);
+                        btn.style.background = 'rgba(34,197,94,0.1)';
+                        btn.style.borderColor = '#22c55e';
+                        btn.style.color = '#22c55e';
+                        btn.disabled = false;
+                        btn.innerHTML = `📥 Tải video sub (${sizeMB}MB)`;
+                        btn.onclick = () => window.location.href = `/api/download-burned-video/${currentJobId}/${lang}`;
+                    } else if (burn.status === 'error') {
+                        clearInterval(interval);
+                    btn.textContent = `❌ ${burn.message}`;
+                        btn.style.color = '#ef4444';
+                        btn.disabled = false;
+                    }
+                } catch (err) {
+                    console.error('Burn sub poll error:', err);
+                }
+            }, 2000);
+        }
+
+        function switchTab(lang) {
+            document.querySelectorAll('.srt-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector(`.srt-tab[data-lang="${lang}"]`).classList.add('active');
+            const info = resultData.srt_files[lang];
+            if (info) {
+            document.getElementById('srtPreview').textContent = info.preview || info.error || 'Không có dữ liệu';
+            }
+        }
+
+        function resetAll() {
+            currentJobId = null;
+            selectedFile = null;
+            resultData = null;
+            urlValidated = false;
+            hardsubFile = null;
+            document.getElementById('fileInput').value = '';
+            document.getElementById('urlInput').value = '';
+            document.getElementById('urlReady').classList.remove('show');
+            document.getElementById('fileInfo').classList.remove('show');
+            document.getElementById('hardsubFileInfo').classList.remove('show');
+            document.getElementById('hardsubFileInput').value = '';
+            document.getElementById('resultSection').classList.remove('show');
+            document.getElementById('uploadCard').style.display = 'block';
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('startBtn').textContent = '🚀 Bắt đầu trích xuất phụ đề';
+            document.getElementById('startHardsubBtn').disabled = true;
+            document.getElementById('startHardsubBtn').textContent = '🔍 Bắt đầu trích hardsub (Gemini)';
+            document.getElementById('progressSection').classList.remove('show');
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('progressFill').style.background = '';
+            document.getElementById('translateProgressList').innerHTML = '';
+            hideError();
+            // Re-apply current input mode visibility
+            switchInputMode(inputMode);
+        }
+// --- Input mode switching ---
+        let inputMode = 'file';
+        let urlValidated = false;
+        let hardsubFile = null;
+        let geminiKeyOk = false;
+
+        function switchInputMode(mode) {
+            inputMode = mode;
+            document.querySelectorAll('.input-tab').forEach((t, i) => {
+                t.classList.toggle('active', (i === 0 && mode === 'file') || (i === 1 && mode === 'url') || (i === 2 && mode === 'hardsub'));
+            });
+            document.getElementById('panelFile').classList.toggle('active', mode === 'file');
+            document.getElementById('panelUrl').classList.toggle('active', mode === 'url');
+            document.getElementById('panelHardsub').classList.toggle('active', mode === 'hardsub');
+
+            // Toggle buttons
+            const isHardsub = mode === 'hardsub';
+            document.getElementById('startBtn').style.display = isHardsub ? 'none' : 'block';
+            document.getElementById('startHardsubBtn').style.display = isHardsub ? 'block' : 'none';
+
+            // Toggle whisper model row visibility
+            document.querySelector('.setting-row').style.display = isHardsub ? 'none' : 'flex';
+
+            if (mode === 'url') {
+                document.getElementById('startBtn').disabled = !urlValidated;
+            } else if (mode === 'hardsub') {
+                updateHardsubBtnState();
+            } else {
+                document.getElementById('startBtn').disabled = !selectedFile;
+            }
+        }
+
+        async function pasteUrl() {
+            try {
+                const text = await navigator.clipboard.readText();
+                document.getElementById('urlInput').value = text;
+                validateUrl();
+            } catch(e) {
+                document.getElementById('urlInput').focus();
+            }
+        }
+
+        document.getElementById('urlInput').addEventListener('input', () => validateUrl());
+        document.getElementById('urlInput').addEventListener('paste', () => setTimeout(validateUrl, 100));
+
+        function validateUrl() {
+            const url = document.getElementById('urlInput').value.trim();
+            if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+                urlValidated = true;
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('urlReady').classList.add('show');
+                try {
+                    const domain = new URL(url).hostname.replace('www.', '');
+                    document.getElementById('urlTitle').textContent = domain + ' - ' + url.substring(0, 60) + (url.length > 60 ? '...' : '');
+                } catch(e) {
+                    document.getElementById('urlTitle').textContent = url.substring(0, 80);
+                }
+            } else {
+                urlValidated = false;
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('urlReady').classList.remove('show');
+            }
+        }
+
+// --- Load device info ---
+        (async function loadDeviceInfo() {
+            const badge = document.getElementById('deviceBadge');
+            try {
+                const res = await fetch('/api/device', { cache: 'no-store' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                if (data.device === 'CUDA') {
+                    badge.className = 'device-badge gpu';
+        badge.textContent = '⚡ GPU: ' + data.gpu_name + ' | ' + data.compute_type;
+                } else {
+                    badge.className = 'device-badge cpu';
+                    badge.textContent = '💻 CPU: ' + data.cpu_threads + ' threads | ' + data.compute_type;
+                }
+            } catch(e) {
+                console.error('Device info error:', e);
+        badge.textContent = '⚠️ Không thể kiểm tra device';
+                badge.className = 'device-badge cpu';
+            }
+        })();
+
+// --- Hardsub Gemini ---
+        // Load Gemini models
+        (async function loadGeminiModels() {
+            try {
+                const res = await fetch('/api/gemini/models');
+                const data = await res.json();
+                const sel = document.getElementById('geminiModel');
+                if (!sel) return;
+                sel.innerHTML = '';
+                for (const [id, info] of Object.entries(data.models)) {
+                    const opt = document.createElement('option');
+                    opt.value = id;
+                    opt.textContent = info.name;
+                    if (id === data.default) opt.selected = true;
+                    sel.appendChild(opt);
+                }
+            } catch(e) { console.error('Load Gemini models error:', e); }
+        })();
+
+        // Check Gemini key status
+        (async function checkGeminiKey() {
+            try {
+                const res = await fetch('/api/gemini/key');
+                const data = await res.json();
+                const status = document.getElementById('keyStatus');
+                if (data.has_key) {
+                    status.textContent = '✅ API key đã được cấu hình an toàn';
+                    status.className = 'key-status ok';
+                    geminiKeyOk = true;
+                } else {
+                    status.textContent = '⚠️ Chưa có API key. Nhập key để sử dụng.';
+                    status.className = 'key-status';
+                    geminiKeyOk = false;
+                }
+            } catch(e) {
+                document.getElementById('keyStatus').textContent = '❌ Không thể kiểm tra key';
+            }
+        })();
+
+        async function saveGeminiKey() {
+            const input = document.getElementById('geminiKeyInput');
+            const key = input.value.trim();
+            if (!key) { alert('Vui lòng nhập API key'); return; }
+
+            const btn = document.getElementById('btnSaveKey');
+            const statusEl = document.getElementById('keyStatus');
+            btn.textContent = '⏳ Đang kiểm tra...';
+            btn.disabled = true;
+            statusEl.textContent = '🔄 Đang xác thực API key với Gemini...';
+            statusEl.className = 'key-status';
+
+            try {
+                const res = await fetch('/api/gemini/key', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ api_key: key }),
+                });
+                const data = await res.json();
+                if (data.error) {
+                    statusEl.textContent = '❌ ' + data.error;
+                    statusEl.className = 'key-status';
+                    geminiKeyOk = false;
+                } else {
+                    statusEl.textContent = '✅ Key hợp lệ và đã được lưu an toàn';
+                    statusEl.className = 'key-status ok';
+                    geminiKeyOk = true;
+                    btn.textContent = '✅ Đã xác thực';
+                    btn.className = 'btn-save-key saved';
+                    input.value = '';
+                    updateHardsubBtnState();
+                    setTimeout(() => {
+                        btn.textContent = '💾 Lưu';
+                        btn.className = 'btn-save-key';
+                    }, 3000);
+                }
+            } catch(e) {
+                statusEl.textContent = '❌ Lỗi kết nối: ' + e.message;
+                statusEl.className = 'key-status';
+            }
+            btn.disabled = false;
+        }
+
+        function toggleKeyVisibility() {
+            const input = document.getElementById('geminiKeyInput');
+            input.type = input.type === 'password' ? 'text' : 'password';
+        }
+
+        // Hardsub file handling
+        document.getElementById('hardsubFileInput').addEventListener('change', (e) => {
+            if (e.target.files.length > 0) handleHardsubFile(e.target.files[0]);
+        });
+
+        const hsZone = document.getElementById('hardsubUploadZone');
+        hsZone.addEventListener('dragover', (e) => { e.preventDefault(); hsZone.classList.add('dragover'); });
+        hsZone.addEventListener('dragleave', () => hsZone.classList.remove('dragover'));
+        hsZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            hsZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) handleHardsubFile(e.dataTransfer.files[0]);
+        });
+
+        function handleHardsubFile(file) {
+            const validTypes = ['.mp4', '.mkv', '.avi', '.mov', '.webm'];
+            const ext = '.' + file.name.split('.').pop().toLowerCase();
+            if (!validTypes.includes(ext)) {
+                showError('Định dạng không hỗ trợ. Vui lòng chọn file MP4, MKV, AVI, MOV hoặc WEBM.');
+                return;
+            }
+            hardsubFile = file;
+            document.getElementById('hardsubFileName').textContent = file.name;
+            const sizeText = formatFileSize(file.size);
+            let sizeWarning = '';
+            if (file.size > 500 * 1024 * 1024) {
+                sizeWarning = ' ⚠️ File lớn, có thể mất nhiều thời gian upload';
+            }
+            document.getElementById('hardsubFileSize').textContent = sizeText + sizeWarning;
+            document.getElementById('hardsubFileInfo').classList.add('show');
+            updateHardsubBtnState();
+            hideError();
+        }
+
+        function removeHardsubFile() {
+            hardsubFile = null;
+            document.getElementById('hardsubFileInput').value = '';
+            document.getElementById('hardsubFileInfo').classList.remove('show');
+            updateHardsubBtnState();
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        }
+        function updateHardsubBtnState() {
+            const btn = document.getElementById('startHardsubBtn');
+            btn.disabled = !(hardsubFile && geminiKeyOk);
+        }
+
+        async function startHardsub() {
+            if (!hardsubFile) { showError('Chưa chọn file video'); return; }
+            if (!geminiKeyOk) { showError('Chưa có Gemini API key. Hãy nhập key trước.'); return; }
+
+            const btn = document.getElementById('startHardsubBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Đang tải lên...';
+
+            try {
+                const formData = new FormData();
+                formData.append('video', hardsubFile);
+                formData.append('gemini_model', document.getElementById('geminiModel').value);
+                formData.append('translate_langs', JSON.stringify([...selectedLangs]));
+                formData.append('translate_method', translateMethod);
+
+                const res = await fetch('/api/hardsub', { method: 'POST', body: formData });
+                const data = await res.json();
+
+                if (!res.ok) {
+                    showError(data.error || 'Thất bại');
+                    btn.disabled = false;
+                    btn.textContent = '🔍 Bắt đầu trích hardsub (Gemini)';
+                    return;
+                }
+
+                currentJobId = data.job_id;
+                document.getElementById('uploadCard').style.display = 'none';
+                document.getElementById('progressSection').classList.add('show');
+                pollInterval = setInterval(pollStatus, 1500);
+
+            } catch(err) {
+                showError('Lỗi kết nối: ' + err.message);
+                btn.disabled = false;
+                btn.textContent = '🔍 Bắt đầu trích hardsub (Gemini)';
+            }
+        }
+    </script>
+
+
+<!-- Multi-Region Selector Modal -->
+<div id="regionModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.85); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:var(--bg-card,#1a1a2e); border-radius:16px; padding:24px; max-width:500px; width:95%; box-shadow:0 20px 60px rgba(0,0,0,0.5); max-height:90vh; overflow-y:auto;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h3 style="margin:0; font-size:16px; color:#f97316;">🎬 Chọn vùng blur &amp; sub</h3>
+            <button onclick="closeRegionModal()" style="background:none; border:none; color:#999; font-size:20px; cursor:pointer;">✕</button>
+        </div>
+        <div style="display:flex; gap:6px; margin-bottom:10px; align-items:center;">
+            <select id="presetSelect" onchange="applyPreset(this.value)" style="flex:1; padding:6px 10px; border-radius:6px; border:1px solid #333; background:#111; color:#eee; font-size:12px;">
+                <option value="">-- Chọn preset --</option>
+            </select>
+            <button onclick="saveCurrentPreset()" style="padding:6px 10px; border-radius:6px; border:1px solid #8b5cf6; background:rgba(139,92,246,0.1); color:#8b5cf6; cursor:pointer; font-size:11px; white-space:nowrap;">💾 Lưu</button>
+        </div>
+        <p style="font-size:11px; color:#888; margin-bottom:8px;">Kéo để di chuyển vùng, kéo góc để thay đổi kích thước. Tối đa 3 vùng.</p>
+        <div id="regionList" style="display:flex; flex-direction:column; gap:4px; margin-bottom:10px;"></div>
+        <button onclick="addExtraRegion()" style="width:100%; padding:6px; border-radius:6px; border:1px dashed #3b82f6; background:transparent; color:#3b82f6; cursor:pointer; font-size:11px; margin-bottom:10px;">➕ Thêm vùng blur (logo, watermark...)</button>
+        <div style="text-align:center;">
+            <div id="regionContainer" style="position:relative; display:inline-block; max-width:100%; user-select:none; border-radius:8px; overflow:hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+                <img id="regionImg" style="max-width:100%; max-height:40vh; display:block;" />
+            </div>
+        </div>
+        <div id="regionInfo" style="text-align:center; font-size:11px; color:#f97316; margin:8px 0;"></div>
+        <div style="display:flex; gap:8px; margin-top:10px;">
+            <button onclick="doBurnSub('auto')" style="flex:1; padding:10px; border-radius:8px; border:1px solid #8b5cf6; background:rgba(139,92,246,0.1); color:#8b5cf6; cursor:pointer; font-size:13px; font-weight:600;">🔍 Auto (OCR)</button>
+            <button onclick="doBurnSub('manual')" style="flex:1; padding:10px; border-radius:8px; border:1px solid #f97316; background:rgba(249,115,22,0.15); color:#f97316; cursor:pointer; font-size:13px; font-weight:600;">✋ Dùng vùng đã chọn</button>
+        </div>
+    </div>
+</div>
+
+
+</body>
+</html>
+
+
+

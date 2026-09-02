@@ -1,0 +1,41 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+config/google_media.json
+config/user_prefs.json
+douyin_cookies.txt
+*.key
+*.pem
+
+# Python
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.bak
+*.swp
+*.tmp
+
+# Media and job artifacts
+uploads/*
+outputs/*
+!uploads/.gitkeep
+!outputs/.gitkeep
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.webm
+*.mp3
+*.wav
+*.flac
+*.aac
+*.log
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

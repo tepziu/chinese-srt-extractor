@@ -1,0 +1,27 @@
+{
+  "default": {
+    "name": "Mặc định (Sub dưới)",
+    "sub_region": {"x_ratio": 0, "y_ratio": 0.78, "w_ratio": 1.0, "h_ratio": 0.18},
+    "extra_regions": []
+  },
+  "douyin_portrait": {
+    "name": "Douyin/TikTok dọc",
+    "sub_region": {"x_ratio": 0, "y_ratio": 0.80, "w_ratio": 1.0, "h_ratio": 0.15},
+    "extra_regions": [
+      {"x_ratio": 0.65, "y_ratio": 0.01, "w_ratio": 0.34, "h_ratio": 0.05}
+    ]
+  },
+  "youtube_landscape": {
+    "name": "YouTube ngang",
+    "sub_region": {"x_ratio": 0, "y_ratio": 0.82, "w_ratio": 1.0, "h_ratio": 0.14},
+    "extra_regions": []
+  },
+  "douyin_logo": {
+    "name": "Douyin dọc + Logo",
+    "sub_region": {"x_ratio": 0, "y_ratio": 0.80, "w_ratio": 1.0, "h_ratio": 0.15},
+    "extra_regions": [
+      {"x_ratio": 0.0, "y_ratio": 0.01, "w_ratio": 0.35, "h_ratio": 0.05},
+      {"x_ratio": 0.65, "y_ratio": 0.01, "w_ratio": 0.34, "h_ratio": 0.05}
+    ]
+  }
+}

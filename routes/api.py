@@ -736,6 +736,9 @@ def start_hardsub():
         return jsonify({"error": "Chưa có Gemini API Key"}), 400
 
     translate_langs = _parse_languages(request.form.get("translate_langs", "[]"))
+    ai_model = request.form.get("ai_model", AI_DEFAULT_MODEL)
+    if ai_model not in AI_TRANSLATE_MODELS and not str(ai_model).strip():
+        ai_model = AI_DEFAULT_MODEL
     translate_method = request.form.get("translate_method", "google")
     if translate_method not in ("ai", "google"):
         translate_method = "google"
@@ -751,6 +754,7 @@ def start_hardsub():
         gemini_model=gemini_model,
         translate_langs=translate_langs,
         translate_method=translate_method,
+        ai_model=ai_model,
         mode="hardsub",
     )
 
@@ -784,16 +788,14 @@ def start_hardsub_url():
         gemini_api_key = get_gemini_api_key()
 
     if not gemini_api_key:
-        video_path.unlink(missing_ok=True)
-        try:
-            job_dir.rmdir()
-        except OSError:
-            pass
         return jsonify({"error": "Chưa có Gemini API Key"}), 400
 
     translate_langs = data.get("translate_langs", [])
     translate_langs = [l for l in translate_langs if l in LANGUAGES]
 
+    ai_model = data.get("ai_model", AI_DEFAULT_MODEL)
+    if ai_model not in AI_TRANSLATE_MODELS and not str(ai_model).strip():
+        ai_model = AI_DEFAULT_MODEL
     translate_method = data.get("translate_method", "google")
     if translate_method not in ("ai", "google"):
         translate_method = "google"
@@ -810,6 +812,7 @@ def start_hardsub_url():
         gemini_model=gemini_model,
         translate_langs=_parse_languages(data.get("translate_langs", [])),
         translate_method=translate_method,
+        ai_model=ai_model,
         mode="hardsub",
     )
 

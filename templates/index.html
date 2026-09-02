@@ -403,6 +403,10 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
 
 
     <script>
+        function escapeHtml(value) {
+            return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        }
+
         let selectedFile = null;
         let currentJobId = null;
         let pollInterval = null;
@@ -746,9 +750,10 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
         }
 
         function showResult(data) {
-            resultData = data;
-            document.getElementById('progressSection').classList.remove('show');
-            document.getElementById('resultSection').classList.add('show');
+            try {
+                resultData = data;
+                document.getElementById('progressSection').classList.remove('show');
+                document.getElementById('resultSection').classList.add('show');
 
             document.getElementById('segmentCount').textContent = data.segment_count;
             
@@ -891,6 +896,11 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
             // Show first preview
             if (firstLang && srtFiles[firstLang]) {
                 document.getElementById('srtPreview').textContent = srtFiles[firstLang].preview || srtFiles[firstLang].error || '';
+            }
+            } catch (err) {
+                console.error("showResult error:", err);
+                document.getElementById('resultSection').classList.add('show');
+                showError("Lỗi hiển thị kết quả: " + err.message);
             }
         }
 
@@ -1595,9 +1605,7 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
             updateHardsubBtnState();
         }
 
-        function escapeHtml(value) {
-            return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-        }
+
         function updateHardsubBtnState() {
             const btn = document.getElementById('startHardsubBtn');
             btn.disabled = !(hardsubFile && geminiKeyOk);

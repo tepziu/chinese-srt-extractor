@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 import time
 
-from config import AI_DEFAULT_MODEL, AI_LANG_NAMES, AI_TRANSLATE_CONFIG, LANGUAGES, jobs
+import json
+from pathlib import Path
+from config import AI_DEFAULT_MODEL, AI_LANG_NAMES, AI_TRANSLATE_CONFIG, LANGUAGES, OUTPUT_FOLDER, jobs
 from services.srt_utils import parse_srt, parse_srt_timing, validate_srt
 
 _NUMBERED_LINE = re.compile(r"^\s*(\d+)[.)]\s*(?:\[([A-Za-z0-9_]+)\]|\(([A-Za-z0-9_]+)\))?\s*(.*?)\s*$")
@@ -236,6 +238,16 @@ def translate_srt_ai(srt_content: str, target_lang: str, job_id: str, ai_model: 
 
     jobs[job_id]["speakers"] = speaker_counts
     jobs[job_id]["segment_speakers"] = segment_speakers
+    try:
+        speakers_dir = OUTPUT_FOLDER / job_id
+        speakers_dir.mkdir(parents=True, exist_ok=True)
+        speakers_file = speakers_dir / "speakers.json"
+        speakers_file.write_text(json.dumps({
+            "speakers": speaker_counts,
+            "segment_speakers": segment_speakers,
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        print(f"Failed to save speakers.json: {exc}")
 
     translated = _rebuild_srt(entries, translated_map)
     valid, errors = validate_srt(translated)

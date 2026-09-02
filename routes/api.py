@@ -222,6 +222,15 @@ def get_status(job_id):
     job = get_job(job_id)
     if job is None:
         return jsonify({"error": "Job không tồn tại"}), 404
+    if "speakers" not in job:
+        speakers_file = OUTPUT_FOLDER / job_id / "speakers.json"
+        if speakers_file.exists():
+            try:
+                data = json.loads(speakers_file.read_text(encoding="utf-8"))
+                job["speakers"] = data.get("speakers", {"M1": 1})
+                job["segment_speakers"] = data.get("segment_speakers", [])
+            except Exception:
+                pass
     # Filter out internal keys and sensitive data
     _HIDDEN_KEYS = {"_ffmpeg_process", "_download_process", "_tts_process", "_created_at", "gemini_api_key", "video_path"}
     safe_data = {k: v for k, v in job.items() if k not in _HIDDEN_KEYS and not k.startswith("_")}
@@ -325,7 +334,20 @@ def get_job_speakers(job_id):
     """Return detected speakers and current voice assignments."""
     job = get_job(job_id)
     if job is None:
-        return jsonify({"error": "Job không tồn tại"}), 404
+    speakers = job.get("speakers")
+    if not speakers:
+        speakers_file = OUTPUT_FOLDER / job_id / "speakers.json"
+        if speakers_file.exists():
+            try:
+                data = json.loads(speakers_file.read_text(encoding="utf-8"))
+                speakers = data.get("speakers")
+                if speakers:
+                    job["speakers"] = speakers
+                    job["segment_speakers"] = data.get("segment_speakers")
+            except Exception:
+                pass
+    if not speakers:
+        speakers = {"M1": 1}
     speakers = job.get("speakers", {"M1": 1})
     return jsonify({
         "speakers": speakers,

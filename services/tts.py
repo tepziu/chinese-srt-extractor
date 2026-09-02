@@ -90,6 +90,25 @@ def _speed_audio_to_fit(source_path: str, audio: AudioSegment, max_duration_ms: 
     return audio
 
 
+def _get_segment_speakers(job_id: str, segments_count: int) -> list[str]:
+    """Retrieve segment speakers from memory or from output/speakers.json on disk."""
+    spks = jobs.get(job_id, {}).get("segment_speakers")
+    if not spks:
+        speakers_file = OUTPUT_FOLDER / job_id / "speakers.json"
+        if speakers_file.exists():
+            try:
+                data = json.loads(speakers_file.read_text(encoding="utf-8"))
+                spks = data.get("segment_speakers")
+                if "speakers" in data:
+                    jobs.setdefault(job_id, {})["speakers"] = data["speakers"]
+                    jobs[job_id]["segment_speakers"] = spks
+            except Exception as exc:
+                print(f"Failed to load speakers.json: {exc}")
+    if not spks:
+        spks = ["M1"] * segments_count
+    return spks
+
+
 def _resolve_speaker_voice(engine: str, lang: str, speaker_id: str, custom_map: dict | None = None) -> tuple[str, str]:
     """Resolve the voice name and pitch/emotion for a given speaker."""
     if custom_map and speaker_id in custom_map:
@@ -117,7 +136,7 @@ def generate_edge_tts_audio(
     tts_key: str,
     speaker_voices: dict | None = None,
 ):
-    segment_speakers = jobs.get(job_id, {}).get("segment_speakers") or ["M1"] * len(segments)
+    segment_speakers = _get_segment_speakers(job_id, len(segments))
 
     async def generate_single_segment(index: int, text: str):
         spk = segment_speakers[index] if index < len(segment_speakers) else "M1"
@@ -237,7 +256,7 @@ def generate_gemini_tts_audio(
 ):
     options = options or {}
     style_prompt = str(options.get("style_prompt") or "").strip()[:500]
-    segment_speakers = jobs.get(job_id, {}).get("segment_speakers") or ["M1"] * len(segments)
+    segment_speakers = _get_segment_speakers(job_id, len(segments))
 
     paths = []
     for index, (_start, _end, text) in enumerate(segments):

@@ -83,6 +83,9 @@ def index():
     html = template_path.read_text(encoding="utf-8")
     resp = make_response(html)
     resp.headers['Content-Type'] = 'text/html; charset=utf-8'
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
     return resp
 
 

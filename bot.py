@@ -44,6 +44,7 @@ from config import (
     COMPUTE_TYPE,
     load_presets, save_presets, validate_region,
     GEMINI_MODELS, GEMINI_DEFAULT_MODEL,
+    AI_TRANSLATE_MODELS, AI_DEFAULT_MODEL,
     get_gemini_api_key, set_gemini_api_key,
 )
 from services.whisper_engine import process_video
@@ -109,6 +110,8 @@ def get_prefs(chat_id):
         p["gemini_model"] = GEMINI_DEFAULT_MODEL
     if "tts_engine" not in p:
         p["tts_engine"] = "edge"
+    if "ai_model" not in p:
+        p["ai_model"] = AI_DEFAULT_MODEL
     _save_user_prefs()
     return p
 
@@ -173,17 +176,17 @@ async def cmd_lang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prefs = get_prefs(update.effective_chat.id)
     
     if not context.args:
-        langs_str = ", ".join(prefs["langs"]) or "không có"
-        supported = ", ".join(f"`{k}` ({v['flag']} {v['name']})" for k, v in LANGUAGES.items())
-        await update.message.reply_text(
-            f"🌍 **Ngôn ngữ dịch hiện tại:** {langs_str}\n\n"
-            f"**Ngôn ngữ hỗ trợ:** {supported}\n\n"
-            f"Ví dụ: `/lang vi en`",
-            parse_mode="Markdown",
-        )
+        curr_aimodel = prefs.get("ai_model", AI_DEFAULT_MODEL)
+        lines = [
+            f"🤖 **Model Dịch AI hiện tại:** `{curr_aimodel}`\n",
+            "Các model khả dụng:",
+        ]
+        for mid, info in AI_TRANSLATE_MODELS.items():
+            mname = info["name"]
+            lines.append(f"• `{mid}` — {mname}")
+        lines.append("\nDùng: `/aimodel tên_model` để đổi")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
         return
-    
-    valid_langs = []
     for lang in context.args:
         lang = lang.lower().strip()
         if lang in LANGUAGES:
@@ -289,6 +292,30 @@ async def cmd_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prefs["model"] = model
     _save_user_prefs()
     await update.message.reply_text(f"✅ Đã chọn model: `{model}`", parse_mode="Markdown")
+
+
+async def cmd_aimodel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /aimodel command — select AI translation model."""
+    prefs = get_prefs(update.effective_chat.id)
+    curr_ai = prefs.get("ai_model", AI_DEFAULT_MODEL)
+    if not context.args:
+        lines = [
+            f"🤖 **Model Dịch AI hiện tại:** `{curr_ai}`\n",
+            "Các model khả dụng:",
+        ]
+        for mid, info in AI_TRANSLATE_MODELS.items():
+            m_name = info.get("name", mid)
+            lines.append(f"• `{mid}` — {m_name}")
+        lines.append("\nDùng: `/aimodel tên_model` để đổi")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        return
+
+    chosen = context.args[0].strip()
+    prefs["ai_model"] = chosen
+    _save_user_prefs()
+    await update.message.reply_text(f"✅ Đã chọn model dịch AI: `{chosen}`", parse_mode="Markdown")
+
+
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -819,6 +846,7 @@ async def _process_and_reply(update, context, status_msg, job_id, file_path, pre
     else:
         # Normal mode: Whisper speech recognition
         await status_msg.edit_text("🎤 Đang trích xuất và nhận dạng giọng nói...")
+        jobs[job_id]["ai_model"] = prefs.get("ai_model", AI_DEFAULT_MODEL)
         future = executor.submit(process_video, job_id, file_path, model_size, translate_langs, "ai")
     
     # Progress update loop: edit message every 10s with current status
@@ -1064,6 +1092,7 @@ def main():
     app.add_handler(CommandHandler("burn", cmd_burn))
     app.add_handler(CommandHandler("preset", cmd_preset))
     app.add_handler(CommandHandler("model", cmd_model))
+    app.add_handler(CommandHandler("aimodel", cmd_aimodel))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("hardsub", cmd_hardsub))
     app.add_handler(CommandHandler("gemini", cmd_gemini))
@@ -1092,6 +1121,7 @@ def main():
             BotCommand("burn", "🎬 Bật/tắt auto burn sub"),
             BotCommand("preset", "📐 Chọn preset vùng blur"),
             BotCommand("model", "🧠 Chọn AI model"),
+            BotCommand("aimodel", "🤖 Chọn model dịch AI"),
             BotCommand("hardsub", "🔍 Bật/tắt trích hardsub"),
             BotCommand("gemini", "🔑 Cài đặt Gemini API"),
             BotCommand("omni", "🎤 Đọc văn bản bằng OmniVoice"),

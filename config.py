@@ -249,6 +249,23 @@ AI_TRANSLATE_CONFIG = {
 }
 AI_LANG_NAMES = {"vi": "Vietnamese", "en": "English", "id": "Indonesian"}
 
+TRANSLATION_MODES = {
+    "movie": {
+        "id": "movie",
+        "name": "Phim & Kịch (Đa nhân vật)",
+        "description": "Dịch đối thoại ngữ cảnh phim, phân biệt các nhân vật [M1, F1, M2, F2, N]",
+        "icon": "🎬",
+    },
+    "driving": {
+        "id": "driving",
+        "name": "Dạy lái xe & Mẹo xe (1 người nói)",
+        "description": "Dịch chuẩn thuật ngữ ô tô/lái xe, văn phong dứt khoát, 1 người hướng dẫn duy nhất [M1]",
+        "icon": "🚗",
+    },
+}
+DEFAULT_TRANSLATION_MODE = "movie"
+
+
 # Multi-speaker voice assignments per language and engine
 SPEAKER_VOICE_MAPS = {
     "edge": {
@@ -325,7 +342,7 @@ def _default_presets() -> dict:
     return {
         "default": {
             "name": "Mặc định (Sub dưới)",
-            "sub_region": {"x_ratio": 0, "y_ratio": 0.78, "w_ratio": 1.0, "h_ratio": 0.18},
+            "sub_region": {"x_ratio": 0.08, "y_ratio": 0.81, "w_ratio": 0.84, "h_ratio": 0.085},
             "extra_regions": [],
         }
     }

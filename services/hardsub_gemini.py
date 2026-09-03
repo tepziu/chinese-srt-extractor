@@ -144,6 +144,7 @@ def hardsub_worker(job: dict) -> None:
 
         if translate_langs:
             from services.translation import translate_srt, translate_srt_ai
+            translation_mode = job.get("translation_mode", "movie")
             job["translate_progress"] = {lang: 0 for lang in translate_langs}
             for lang in translate_langs:
                 if job.get("cancel"):
@@ -151,7 +152,7 @@ def hardsub_worker(job: dict) -> None:
                     job["message"] = "Đã hủy dịch thuật."
                     return
                 try:
-                    translated = translate_srt_ai(srt_content, lang, job_id) if translate_method == "ai" else translate_srt(srt_content, lang, job_id)
+                    translated = translate_srt_ai(srt_content, lang, job_id, translation_mode=translation_mode) if translate_method == "ai" else translate_srt(srt_content, lang, job_id)
                     translated_valid, translated_errors = validate_srt(translated)
                     if not translated_valid:
                         raise RuntimeError("Bản dịch SRT không hợp lệ: " + "; ".join(translated_errors[:2]))

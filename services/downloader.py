@@ -270,11 +270,12 @@ def process_url_video(
     model_size: str,
     translate_langs: list,
     translate_method: str = "ai",
+    translation_mode: str = "movie",
 ) -> None:
     """Download a video, then run the normal Whisper pipeline."""
     try:
         video_path = download_from_url(job_id, url)
-        process_video(job_id, video_path, model_size, translate_langs, translate_method)
+        process_video(job_id, video_path, model_size, translate_langs, translate_method, translation_mode=translation_mode)
     except Exception as exc:
         if jobs.get(job_id):
             jobs[job_id]["status"] = "error"

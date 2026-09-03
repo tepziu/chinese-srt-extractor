@@ -152,13 +152,15 @@ def split_segments_by_sentence(segments, max_chars: int = 30):
     return result
 
 
-def process_video(job_id: str, video_path: str, model_size: str, translate_langs: list[str], translate_method: str = "ai") -> None:
+def process_video(job_id: str, video_path: str, model_size: str, translate_langs: list[str], translate_method: str = "ai", translation_mode: str = "movie") -> None:
     """Run the complete Whisper -> SRT -> translation pipeline in a worker."""
     audio_path = None
     total_started = time.time()
     job = jobs[job_id]
     job["device"] = DEVICE.upper()
     job["compute_type"] = COMPUTE_TYPE
+    translation_mode = translation_mode or job.get("translation_mode", "movie")
+    job["translation_mode"] = translation_mode
     try:
         audio_path = extract_audio(video_path, job_id)
         job["status"] = "loading_model"
@@ -248,7 +250,7 @@ def process_video(job_id: str, video_path: str, model_size: str, translate_langs
             lang_info = LANGUAGES[lang_code]
             job["message"] = f"Đang dịch sang {lang_info['name']}..."
             try:
-                translated = translate_srt_ai(srt_content, lang_code, job_id) if translate_method == "ai" else translate_srt(srt_content, lang_code, job_id)
+                translated = translate_srt_ai(srt_content, lang_code, job_id, translation_mode=translation_mode) if translate_method == "ai" else translate_srt(srt_content, lang_code, job_id)
                 translated_valid, translated_errors = validate_srt(translated)
                 if not translated_valid:
                     raise RuntimeError(f"Bản dịch SRT không hợp lệ: {'; '.join(translated_errors[:2])}")

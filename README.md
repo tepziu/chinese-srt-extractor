@@ -4,9 +4,9 @@ Công cụ local trên Windows/Linux để:
 
 - Trích xuất tiếng Trung bằng Faster-Whisper (CUDA/CPU).
 - Trích hardsub từ hình ảnh bằng Gemini.
-- Dịch sang Tiếng Việt, English và Bahasa Indonesia.
+- Dịch sang Tiếng Việt, English và Bahasa Indonesia với 2 phong cách chuyên biệt: Phim ảnh (đa nhân vật [M1, F1, M2, F2, N]) hoặc Dạy lái xe & Mẹo xe (chuẩn thuật ngữ ô tô/lái xe, 1 giọng hướng dẫn [M1]).
 - Tạo TTS bằng Edge-TTS, Gemini TTS hoặc OmniVoice tùy cấu hình.
-- Burn phụ đề mới, làm mờ vùng hardsub/logo và thay audio.
+- Xử lý video đa chế độ: Dynamic Blur (chỉ làm mờ khi có thoại theo timeline SRT), AI Clean Plate (tẩy sạch 100% chữ tiếng Trung bằng Inpaint) hoặc Inpaint & Re-burn phụ đề mới.
 - Nhận video/URL qua Web UI hoặc Telegram Bot.
 
 ## Cài đặt Windows
@@ -81,6 +81,8 @@ Background cleanup dọn recursive artifact cũ và không xóa job đang chạy
 ```text
 /lang vi en
 /model large-v3-turbo
+/mode movie|driving
+/vmode blur|clean|inpaint_burn
 /tts on
 /voice edge|gemini|omnivoice
 /burn on

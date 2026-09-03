@@ -46,6 +46,7 @@ from config import (
     GEMINI_MODELS, GEMINI_DEFAULT_MODEL,
     AI_TRANSLATE_MODELS, AI_DEFAULT_MODEL,
     get_gemini_api_key, set_gemini_api_key,
+    TRANSLATION_MODES, DEFAULT_TRANSLATION_MODE,
 )
 from services.whisper_engine import process_video
 from services.downloader import download_from_url
@@ -108,6 +109,10 @@ def get_prefs(chat_id):
         p["hardsub"] = False
     if "gemini_model" not in p:
         p["gemini_model"] = GEMINI_DEFAULT_MODEL
+    if "translation_mode" not in p:
+        p["translation_mode"] = DEFAULT_TRANSLATION_MODE
+    if "vmode" not in p:
+        p["vmode"] = "blur"
     if "tts_engine" not in p:
         p["tts_engine"] = "edge"
     if "ai_model" not in p:
@@ -134,6 +139,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/lang - Chọn ngôn ngữ dịch\n"
         "/tts - Bật/tắt tạo audio\n"
         "/model - Chọn AI model\n"
+        "/mode - 🎯 Phong cách dịch (movie: Phim | driving: Dạy lái xe)\n"
         "/hardsub - 🔍 Bật/tắt trích hardsub (Gemini)\n"
         "/gemini - 🔑 Cài đặt Gemini API\n"
         "/status - Xem cài đặt hiện tại\n"
@@ -160,7 +166,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`/voice omnivoice` - Chọn engine TTS (edge/omnivoice)\n"
         "`/burn on/off` - Bật/tắt auto burn\n"
         "`/preset` - Xem/chọn preset vùng blur\n"
-        "`/model large-v3-turbo` - Chọn AI model\n\n"
+        "`/model large-v3-turbo` - Chọn AI model\n`/mode movie|driving` - Chọn phong cách dịch (Phim / Dạy lái xe)\n\n"
         "**🔍 Hardsub (Gemini OCR):**\n"
         "`/hardsub on` - Bật trích sub cứng bằng Gemini\n"
         "`/hardsub off` - Quay lại Whisper\n"
@@ -318,6 +324,41 @@ async def cmd_aimodel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /mode or /style command — switch between movie dialogue and driving tutorial styles"""
+    prefs = get_prefs(update.effective_chat.id)
+    args = context.args
+    if not args:
+        curr = prefs.get("translation_mode", DEFAULT_TRANSLATION_MODE)
+        options = []
+        for k, v in TRANSLATION_MODES.items():
+            check = "✅ " if k == curr else "   "
+            options.append(f"{check}`/mode {k}` : {v['icon']} *{v['name']}*\n   _{v['description']}_")
+        await update.message.reply_text(
+            "🎯 *Tùy chọn phong cách dịch thuật:*\n\n"
+            + "\n\n".join(options)
+            + "\n\n💡 Ví dụ: gõ `/mode driving` để chọn dạy lái xe, `/mode movie` để chọn dịch phim.",
+            parse_mode="Markdown",
+        )
+        return
+
+    chosen = args[0].lower().strip()
+    if chosen not in TRANSLATION_MODES:
+        valid_modes = ", ".join(f"`{k}`" for k in TRANSLATION_MODES.keys())
+        await update.message.reply_text(
+            f"❌ Chế độ không hợp lệ. Các chế độ hợp lệ: {valid_modes}",
+            parse_mode="Markdown",
+        )
+        return
+
+    prefs["translation_mode"] = chosen
+    _save_user_prefs()
+    info = TRANSLATION_MODES[chosen]
+    await update.message.reply_text(
+        f"✅ Đã chuyển phong cách dịch sang: {info['icon']} *{info['name']}*\n_{info['description']}_",
+        parse_mode="Markdown",
+    )
+
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /status command"""
     prefs = get_prefs(update.effective_chat.id)
@@ -336,12 +377,18 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     gemini_model = prefs.get("gemini_model", GEMINI_DEFAULT_MODEL)
     tts_engine = prefs.get("tts_engine", "edge")
     
+    mode_key = prefs.get("translation_mode", DEFAULT_TRANSLATION_MODE)
+    mode_info = TRANSLATION_MODES.get(mode_key, {})
+    mode_str = f"{mode_info.get('icon', '🎯')} {mode_info.get('name', mode_key)}"
+
     await update.message.reply_text(
         f"⚙️ **Cài đặt hiện tại:**\n\n"
         f"🌍 Ngôn ngữ dịch: {langs_str}\n"
+        f"🎯 Phong cách dịch: {mode_str}\n"
         f"🧠 AI Model: `{prefs['model']}`\n"
         f"🔊 TTS Audio: {tts_str} (`{tts_engine}`)\n"
         f"🎬 Auto Burn: {burn_str}\n"
+        f"🎞️ Render Mode: `{prefs.get('vmode', 'blur')}` ({VMODES.get(prefs.get('vmode', 'blur'), 'blur')})\n"
         f"📐 Preset: `{preset_key}` ({preset_name})\n"
         f"🔍 Hardsub: {hardsub_str}\n"
         f"🔑 Gemini Key: {key_str}\n"
@@ -349,6 +396,33 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🖥️ GPU: `{DEVICE.upper()} ({COMPUTE_TYPE})`",
         parse_mode="Markdown",
     )
+
+
+VMODES = {
+    "blur": "⚡ Dynamic Blur (Nhanh & Tự nhiên)",
+    "clean": "🧹 AI Clean Plate (Xóa sạch chữ)",
+    "inpaint_burn": "🌟 Inpaint & Re-burn (Xóa sạch + Sub mới)",
+}
+
+async def cmd_vmode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /vmode command — select video processing / inpainting mode"""
+    prefs = get_prefs(update.effective_chat.id)
+    if not context.args:
+        curr = prefs.get("vmode", "blur")
+        lines = [f"🎬 *Chế độ xử lý video hiện tại:* `{curr}`\n"]
+        for k, name in VMODES.items():
+            check = "✅ " if k == curr else "   "
+            lines.append(f"{check}`/vmode {k}` — {name}")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        return
+
+    val = context.args[0].lower().strip()
+    if val in VMODES:
+        prefs["vmode"] = val
+        _save_user_prefs()
+        await update.message.reply_text(f"✅ Đã đổi chế độ xử lý video sang: *{VMODES[val]}*", parse_mode="Markdown")
+    else:
+        await update.message.reply_text("❌ Chế độ không hợp lệ. Chọn: `blur`, `clean`, hoặc `inpaint_burn`", parse_mode="Markdown")
 
 
 async def cmd_burn(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -841,13 +915,15 @@ async def _process_and_reply(update, context, status_msg, job_id, file_path, pre
         job["gemini_model"] = prefs.get("gemini_model", GEMINI_DEFAULT_MODEL)
         job["translate_langs"] = translate_langs
         job["translate_method"] = "ai"
+        job["translation_mode"] = prefs.get("translation_mode", DEFAULT_TRANSLATION_MODE)
         job["mode"] = "hardsub"
         future = executor.submit(hardsub_worker, job)
     else:
         # Normal mode: Whisper speech recognition
         await status_msg.edit_text("🎤 Đang trích xuất và nhận dạng giọng nói...")
         jobs[job_id]["ai_model"] = prefs.get("ai_model", AI_DEFAULT_MODEL)
-        future = executor.submit(process_video, job_id, file_path, model_size, translate_langs, "ai")
+        jobs[job_id]["translation_mode"] = prefs.get("translation_mode", DEFAULT_TRANSLATION_MODE)
+        future = executor.submit(process_video, job_id, file_path, model_size, translate_langs, "ai", prefs.get("translation_mode", DEFAULT_TRANSLATION_MODE))
     
     # Progress update loop: edit message every 10s with current status
     TIMEOUT_SECONDS = 1800  # 30 minutes max
@@ -1025,7 +1101,8 @@ async def _process_and_reply(update, context, status_msg, job_id, file_path, pre
 
                     await loop.run_in_executor(
                         None, burn_sub_video,
-                        job_id, lang, srt_content, sub_region, extra_regions
+                        job_id, lang, srt_content, sub_region, extra_regions,
+                        prefs.get("vmode", "blur")
                     )
 
                     burn_key = f"burn_{lang}"
@@ -1090,9 +1167,12 @@ def main():
     app.add_handler(CommandHandler("tts", cmd_tts))
     app.add_handler(CommandHandler("voice", cmd_voice))
     app.add_handler(CommandHandler("burn", cmd_burn))
+    app.add_handler(CommandHandler("vmode", cmd_vmode))
     app.add_handler(CommandHandler("preset", cmd_preset))
     app.add_handler(CommandHandler("model", cmd_model))
     app.add_handler(CommandHandler("aimodel", cmd_aimodel))
+    app.add_handler(CommandHandler("mode", cmd_mode))
+    app.add_handler(CommandHandler("style", cmd_mode))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("hardsub", cmd_hardsub))
     app.add_handler(CommandHandler("gemini", cmd_gemini))

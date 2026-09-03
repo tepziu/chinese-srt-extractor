@@ -21,6 +21,7 @@ from config import (
     GEMINI_MODELS, GEMINI_DEFAULT_MODEL,
     AI_TRANSLATE_MODELS, AI_DEFAULT_MODEL, SPEAKER_VOICE_MAPS,
     get_gemini_api_key, set_gemini_api_key,
+    TRANSLATION_MODES, DEFAULT_TRANSLATION_MODE,
 )
 from services.whisper_engine import process_video
 from services.tts import tts_worker
@@ -148,6 +149,9 @@ def upload_video():
     translate_method = request.form.get("translate_method", "ai")
     if translate_method not in ("ai", "google"):
         translate_method = "ai"
+    translation_mode = request.form.get("translation_mode", DEFAULT_TRANSLATION_MODE)
+    if translation_mode not in TRANSLATION_MODES:
+        translation_mode = DEFAULT_TRANSLATION_MODE
 
     create_job(
         job_id,
@@ -155,6 +159,7 @@ def upload_video():
         video_path=str(video_path),
         translate_langs=translate_langs,
         translate_method=translate_method,
+        translation_mode=translation_mode,
         ai_model=ai_model,
     )
 
@@ -162,7 +167,7 @@ def upload_video():
 
     thread = threading.Thread(
         target=process_video,
-        args=(job_id, str(video_path), model_size, translate_langs, translate_method),
+        args=(job_id, str(video_path), model_size, translate_langs, translate_method, translation_mode),
         daemon=True,
     )
     thread.start()
@@ -205,12 +210,16 @@ def url_download():
     translate_method = data.get("translate_method", "ai")
     if translate_method not in ("ai", "google"):
         translate_method = "ai"
+    translation_mode = data.get("translation_mode", DEFAULT_TRANSLATION_MODE)
+    if translation_mode not in TRANSLATION_MODES:
+        translation_mode = DEFAULT_TRANSLATION_MODE
     jobs[job_id]["translate_method"] = translate_method
+    jobs[job_id]["translation_mode"] = translation_mode
     jobs[job_id]["ai_model"] = ai_model
 
     thread = threading.Thread(
         target=process_url_video,
-        args=(job_id, url, model_size, translate_langs, translate_method),
+        args=(job_id, url, model_size, translate_langs, translate_method, translation_mode),
         daemon=True,
     )
     thread.start()
@@ -281,6 +290,24 @@ def get_status(job_id):
                         "filename": tts_file.name,
                         "size": tts_file.stat().st_size,
                     }
+
+                # Restore burned/clean videos from disk if present
+                burn_candidates = list(output_dir.glob("*_sub.mp4")) + list(output_dir.glob("burned_*.mp4")) + list(output_dir.glob("*_clean.mp4")) + list(OUTPUT_FOLDER.glob(f"{job_id}_burned_*.mp4"))
+                for b_path in burn_candidates:
+                    if b_path.exists() and b_path.stat().st_size > 0:
+                        b_lang = "vi"
+                        for l in ("vi", "en", "id"):
+                            if f"_{l}" in b_path.name:
+                                b_lang = l
+                                break
+                        job[f"burn_{b_lang}"] = {
+                            "status": "done",
+                            "progress": 100,
+                            "message": f"Hoàn thành ({b_path.stat().st_size / 1048576:.1f}MB)",
+                            "path": str(b_path),
+                            "filename": b_path.name,
+                            "size": b_path.stat().st_size,
+                        }
     if job is None:
         return jsonify({"error": "Job không tồn tại"}), 404
 
@@ -381,6 +408,43 @@ def download_video_file(job_id):
 
 
 # ── AI Translation Models & Multi-Speaker ──────────────────────────────
+
+@api_bp.route("/api/render-modes")
+def get_render_modes():
+    """Get available video processing / inpainting modes."""
+    return jsonify({
+        "modes": {
+            "blur": {
+                "id": "blur",
+                "name": "Dynamic Blur & Burn (Nhanh & Tự nhiên)",
+                "description": "Làm mờ viền mềm chỉ khi có phụ đề, đè phụ đề mới (3–5s)",
+                "icon": "⚡",
+            },
+            "clean": {
+                "id": "clean",
+                "name": "AI Clean Plate (Tẩy sạch chữ hoàn toàn)",
+                "description": "Xóa sạch phụ đề tiếng Trung, giữ video nguyên bản không tì vết",
+                "icon": "🧹",
+            },
+            "inpaint_burn": {
+                "id": "inpaint_burn",
+                "name": "Inpaint & Re-burn (Xóa sạch rồi đè sub mới)",
+                "description": "Tẩy sạch chữ cũ trước, sau đó chèn phụ đề tiếng Việt mới lên",
+                "icon": "🌟",
+            },
+        },
+        "default": "blur",
+    })
+
+
+@api_bp.route("/api/translation-modes")
+def get_translation_modes():
+    """Get available translation modes/genres"""
+    return jsonify({
+        "modes": TRANSLATION_MODES,
+        "default": DEFAULT_TRANSLATION_MODE,
+    })
+
 
 @api_bp.route("/api/translation/models")
 def get_translation_models():
@@ -621,9 +685,16 @@ def trigger_burnsub(job_id, lang):
         except (ValueError, TypeError):
             pass
 
+    render_mode = str(data.get("render_mode", "blur")).lower().strip()
+    if render_mode not in ("blur", "clean", "inpaint_burn"):
+        render_mode = "blur"
+    inpaint_engine = str(data.get("inpaint_engine", "opencv")).lower().strip()
+    if inpaint_engine not in ("opencv", "lama"):
+        inpaint_engine = "opencv"
+
     thread = threading.Thread(
         target=burnsub_worker,
-        args=(job_id, lang, srt_content, sub_region, extra_regions),
+        args=(job_id, lang, srt_content, sub_region, extra_regions, render_mode, inpaint_engine),
         daemon=True,
     )
     thread.start()
@@ -685,24 +756,40 @@ def delete_preset(key):
 
 @api_bp.route("/api/download-burned-video/<job_id>/<lang>")
 def download_burned_video(job_id, lang):
-    if job_id not in jobs:
-        return jsonify({"error": "Job không tồn tại"}), 404
+    job = get_job(job_id)
+    video_path = ""
+    download_filename = f"video_{lang}_sub.mp4"
 
-    job = jobs[job_id]
-    burn_key = f"burn_{lang}"
-    burn_info = job.get(burn_key, {})
+    if job:
+        burn_key = f"burn_{lang}"
+        burn_info = job.get(burn_key, {})
+        video_path = burn_info.get("path", "")
+        download_filename = burn_info.get("filename", download_filename)
 
-    if burn_info.get("status") != "done":
-        return jsonify({"error": "Video chưa sẵn sàng"}), 400
-
-    video_path = burn_info.get("path", "")
+    # Disk fallback if in-memory job state is lost or not done
     if not video_path or not os.path.exists(video_path):
-        return jsonify({"error": "File video không tồn tại"}), 404
+        candidates = [
+            OUTPUT_FOLDER / job_id / f"burned_{lang}.mp4",
+            OUTPUT_FOLDER / f"{job_id}_burned_{lang}.mp4",
+            OUTPUT_FOLDER / job_id / f"{lang}_sub.mp4",
+        ]
+        output_dir = OUTPUT_FOLDER / job_id
+        if output_dir.exists():
+            candidates.extend(output_dir.glob(f"*{lang}*.mp4"))
+            candidates.extend(output_dir.glob("*clean*.mp4"))
+        for cand in candidates:
+            if cand.exists() and cand.stat().st_size > 0:
+                video_path = str(cand)
+                download_filename = cand.name
+                break
+
+    if not video_path or not os.path.exists(video_path):
+        return jsonify({"error": "File video đã burn không tồn tại"}), 404
 
     return send_file(
         video_path,
         as_attachment=True,
-        download_name=burn_info.get("filename", f"video_{lang}_sub.mp4"),
+        download_name=download_filename,
         mimetype="video/mp4",
     )
 
@@ -807,6 +894,10 @@ def start_hardsub():
     if gemini_model not in GEMINI_MODELS:
         gemini_model = GEMINI_DEFAULT_MODEL
 
+    translation_mode = request.form.get("translation_mode", DEFAULT_TRANSLATION_MODE)
+    if translation_mode not in TRANSLATION_MODES:
+        translation_mode = DEFAULT_TRANSLATION_MODE
+
     create_job(
         job_id,
         original_name=str(video.filename),
@@ -816,6 +907,7 @@ def start_hardsub():
         gemini_model=gemini_model,
         translate_langs=translate_langs,
         translate_method=translate_method,
+        translation_mode=translation_mode,
         ai_model=ai_model,
         mode="hardsub",
     )
@@ -866,6 +958,10 @@ def start_hardsub_url():
 
     if gemini_model not in GEMINI_MODELS:
         gemini_model = GEMINI_DEFAULT_MODEL
+    translation_mode = data.get("translation_mode", DEFAULT_TRANSLATION_MODE)
+    if translation_mode not in TRANSLATION_MODES:
+        translation_mode = DEFAULT_TRANSLATION_MODE
+
     create_job(
         job_id,
         status="downloading_video",
@@ -874,6 +970,7 @@ def start_hardsub_url():
         gemini_model=gemini_model,
         translate_langs=_parse_languages(data.get("translate_langs", [])),
         translate_method=translate_method,
+        translation_mode=translation_mode,
         ai_model=ai_model,
         mode="hardsub",
     )

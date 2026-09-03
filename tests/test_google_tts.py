@@ -50,7 +50,7 @@ class GoogleTTSTests(unittest.TestCase):
             media_path = Path(temp_dir) / "google_media.json"
             media_path.write_text(json.dumps({"api_key": "file-secret"}), encoding="utf-8")
             with patch.object(google_tts, "GOOGLE_MEDIA_CONFIG", media_path), \
-                 patch.dict("os.environ", {"GEMINI_API_KEY": "env-secret"}, clear=False):
+                 patch.dict("os.environ", {"GEMINI_API_KEY": "env-secret", "GOOGLE_MEDIA_API_KEY": "", "GOOGLE_MEDIA_API_KEYS": ""}, clear=False):
                 keys, source = google_tts.load_google_media_credentials()
                 self.assertEqual(keys, ("env-secret",))
                 self.assertEqual(source, "GEMINI_API_KEY")

@@ -224,7 +224,66 @@ def url_download():
 def get_status(job_id):
     job = get_job(job_id)
     if job is None:
+        output_dir = OUTPUT_FOLDER / job_id
+        if output_dir.exists() and output_dir.is_dir():
+            srt_files = {}
+            for srt_path in output_dir.glob("*.srt"):
+                stem = srt_path.stem
+                lang = "zh"
+                for l in ("vi", "en", "id"):
+                    if stem.endswith(f"_{l}") or stem.endswith(f".{l}"):
+                        lang = l
+                        break
+                meta = LANGUAGES.get(lang, {"name": "中文 (原文)" if lang == "zh" else lang, "flag": "🇨🇳" if lang == "zh" else "🏳️"})
+                try:
+                    content = srt_path.read_text(encoding="utf-8")
+                except Exception:
+                    content = ""
+                srt_files[lang] = {
+                    "path": str(srt_path),
+                    "filename": srt_path.name,
+                    "preview": content[:1500],
+                    "lang_name": meta.get("name", lang),
+                    "flag": meta.get("flag", "🏳️"),
+                }
+            if srt_files:
+                speakers = {}
+                speakers_file = output_dir / "speakers.json"
+                if speakers_file.exists():
+                    try:
+                        data = json.loads(speakers_file.read_text(encoding="utf-8"))
+                        speakers = data.get("speakers", {})
+                    except Exception:
+                        pass
+                upload_dir = UPLOAD_FOLDER / job_id
+                video_file = None
+                if upload_dir.exists():
+                    for v_path in upload_dir.glob("source.*"):
+                        video_file = {"path": str(v_path), "filename": v_path.name, "size": v_path.stat().st_size}
+                        break
+                job = create_job(
+                    job_id,
+                    status="done",
+                    progress=100,
+                    message="Hoàn thành!",
+                    segment_count=len(srt_files.get("zh", {}).get("preview", "").split("\n\n")),
+                    srt_files=srt_files,
+                    speakers=speakers,
+                    video_file=video_file,
+                )
+                for tts_file in output_dir.glob("tts_*.mp3"):
+                    t_lang = tts_file.stem.replace("tts_", "")
+                    job[f"tts_{t_lang}"] = {
+                        "status": "done",
+                        "progress": 100,
+                        "message": f"Hoàn thành ({tts_file.stat().st_size / 1048576:.1f}MB)",
+                        "path": str(tts_file),
+                        "filename": tts_file.name,
+                        "size": tts_file.stat().st_size,
+                    }
+    if job is None:
         return jsonify({"error": "Job không tồn tại"}), 404
+
     if "speakers" not in job:
         speakers_file = OUTPUT_FOLDER / job_id / "speakers.json"
         if speakers_file.exists():
@@ -234,7 +293,7 @@ def get_status(job_id):
                 job["segment_speakers"] = data.get("segment_speakers", [])
             except Exception:
                 pass
-    # Filter out internal keys and sensitive data
+
     _HIDDEN_KEYS = {"_ffmpeg_process", "_download_process", "_tts_process", "_created_at", "gemini_api_key", "video_path"}
     safe_data = {k: v for k, v in job.items() if k not in _HIDDEN_KEYS and not k.startswith("_")}
     return jsonify(safe_data)

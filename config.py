@@ -273,13 +273,6 @@ SPEAKER_VOICE_MAPS = {
             "F2": {"voice": "id-ID-GadisNeural", "name": "Wanita Pendukung", "gender": "female", "pitch": "+4Hz"},
             "N": {"voice": "id-ID-ArdiNeural", "name": "Narator", "gender": "neutral", "pitch": "+0Hz"},
         },
-        "zh": {
-            "M1": {"voice": "zh-CN-YunxiNeural", "name": "男主 (云希)", "gender": "male", "pitch": "+0Hz"},
-            "F1": {"voice": "zh-CN-XiaoxiaoNeural", "name": "女主 (晓晓)", "gender": "female", "pitch": "+0Hz"},
-            "M2": {"voice": "zh-CN-YunjianNeural", "name": "男配 (云健)", "gender": "male", "pitch": "-4Hz"},
-            "F2": {"voice": "zh-CN-XiaoyiNeural", "name": "女配 (晓伊)", "gender": "female", "pitch": "+4Hz"},
-            "N": {"voice": "zh-CN-YunxiNeural", "name": "旁白", "gender": "neutral", "pitch": "+0Hz"},
-        }
     },
     "gemini": {
         "vi": {
@@ -303,7 +296,6 @@ TTS_VOICES = {
     "vi": "vi-VN-NamMinhNeural",
     "en": "en-US-GuyNeural",
     "id": "id-ID-ArdiNeural",
-    "zh": "zh-CN-YunxiNeural",
 }
 
 PRESETS_FILE = BASE_DIR / "presets.json"

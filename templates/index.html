@@ -410,7 +410,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
         let selectedFile = null;
         let currentJobId = null;
         let pollInterval = null;
-        let selectedLangs = new Set(['vi']);
+        let selectedLangs = new Set();
         let resultData = null;
         let translateMethod = 'ai';
         let ttsEngine = 'edge';
@@ -893,8 +893,10 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
                                 </div>
                             </div>
                             <select class="speaker-voice-select" data-speaker="${escapeHtml(spkId)}" style="padding:4px 8px; background:var(--bg-secondary); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:11px;">
-                                <option value="vi-VN-NamMinhNeural" ${!isFem ? "selected" : ""}>👨 Nam Minh (Nam trầm)</option>
-                                <option value="vi-VN-HoaiMyNeural" ${isFem ? "selected" : ""}>👩 Hoài My (Nữ truyền cảm)</option>
+                                <option value="vi-VN-NamMinhNeural" ${!isFem ? "selected" : ""}>👨 Nam Minh (Tiếng Việt)</option>
+                                <option value="vi-VN-HoaiMyNeural" ${isFem ? "selected" : ""}>👩 Hoài My (Tiếng Việt)</option>
+                                <option value="en-US-GuyNeural">👨 Guy (English)</option>
+                                <option value="en-US-JennyNeural">👩 Jenny (English)</option>
                             </select>
                         </div>
                     `;
@@ -904,11 +906,13 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
                 speakerCard.style.display = "none";
             }
 
-            // Build TTS buttons
+            // Build TTS buttons (completely skip Chinese zh)
             const ttsRow = document.getElementById('ttsRow');
             let ttsHtml = '<span style="font-size:12px; color:var(--text-muted); margin-right:6px;">🔊 Tạo audio TTS:</span>';
+            let ttsButtonCount = 0;
             for (const [lang, info] of Object.entries(srtFiles)) {
-                if (info.error) continue;
+                if (info.error || lang === 'zh') continue;
+                ttsButtonCount++;
                 const meta = langMeta[lang] || { flag: info.flag || '🏳️', name: info.lang_name || lang };
                 ttsHtml += `
                     <button class="btn-tts" id="ttsBtn_${lang}" onclick="generateTTS('${lang}')">
@@ -916,19 +920,27 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
                     </button>
                 `;
             }
+            if (ttsButtonCount === 0) {
+                ttsHtml = '<span style="font-size:12px; color:var(--text-muted);">ℹ️ Hãy chọn ngôn ngữ dịch (Tiếng Việt hoặc English) khi trích xuất để tạo audio TTS.</span>';
+            }
             ttsRow.innerHTML = ttsHtml;
 
-            // Build Burn Sub buttons
+            // Build Burn Sub buttons (completely skip Chinese zh)
             const burnSubRow = document.getElementById('burnSubRow');
-        let burnHtml = '<span style="font-size:12px; color:var(--text-muted); margin-right:6px;">🎬 Burn sub vào video:</span>';
+            let burnHtml = '<span style="font-size:12px; color:var(--text-muted); margin-right:6px;">🎬 Burn sub vào video:</span>';
+            let burnButtonCount = 0;
             for (const [lang, info] of Object.entries(srtFiles)) {
                 if (info.error || lang === 'zh') continue;
+                burnButtonCount++;
                 const meta = langMeta[lang] || { flag: info.flag || '🏳️', name: info.lang_name || lang };
                 burnHtml += `
                     <button class="btn-tts" id="burnBtn_${lang}" onclick="generateBurnSub('${lang}')" style="background:rgba(249,115,22,0.1); border-color:#f97316; color:#f97316;">
                         🎬 ${meta.flag} ${meta.name}
                     </button>
                 `;
+            }
+            if (burnButtonCount === 0) {
+                burnHtml = '<span style="font-size:12px; color:var(--text-muted);">ℹ️ Hãy chọn ngôn ngữ dịch khi trích xuất để burn sub vào video.</span>';
             }
             burnSubRow.innerHTML = burnHtml;
 
@@ -1480,20 +1492,6 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
                 document.getElementById('urlReady').classList.remove('show');
             }
         }
-
-// --- Auto-select Vietnamese ---
-        document.addEventListener('DOMContentLoaded', () => {
-            const viOpt = document.querySelector('.lang-option[data-lang="vi"]');
-            if (viOpt && !viOpt.classList.contains('selected')) {
-                viOpt.classList.add('selected');
-                viOpt.querySelector('.lang-status').textContent = '✅ Đã chọn';
-                const checkmark = viOpt.querySelector('.checkmark');
-                if (checkmark) checkmark.style.color = 'white';
-                const cb = viOpt.querySelector('input[type="checkbox"]');
-                if (cb) cb.checked = true;
-            }
-            updateSelectedCount();
-        });
 
 // --- Load device info ---
         (async function loadDeviceInfo() {

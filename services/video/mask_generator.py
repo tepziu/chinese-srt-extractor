@@ -1,7 +1,7 @@
-"""
-mask_generator.py — Local text mask generation and seamless feather blending.
-Employs character bridging, convex hull grouping, and boundary expansion
-to completely eliminate black outline / drop shadow ghost text.
+﻿"""
+mask_generator.py — High-precision subtitle text mask generation.
+Detects subtitle cores (yellow, white, bright text) and their exact black outline/shadow,
+without falsely detecting light-colored backgrounds (dashboards, roads, sky, shirts).
 """
 
 from __future__ import annotations
@@ -10,64 +10,63 @@ import cv2
 import numpy as np
 
 
-def generate_text_mask(crop_img: np.ndarray, dilation_radius: int = 12) -> np.ndarray:
-    """Extract a stable, cohesive subtitle mask from a cropped subtitle strip.
+def generate_text_mask(crop_img: np.ndarray, dilation_radius: int = 10) -> np.ndarray:
+    """Extract an accurate, clean subtitle text mask covering characters and strokes.
 
-    Detects text strokes (white, yellow, bright colors), bridges adjacent characters,
-    groups text contours with convex hulls, and expands boundaries to swallow
-    black outlines, strokes, and drop shadows completely.
+    Specifically avoids false-positive background detection on light-colored surfaces.
     """
     if crop_img is None or crop_img.size == 0:
         return np.zeros((1, 1), dtype=np.uint8)
 
     h, w = crop_img.shape[:2]
-    gray = cv2.cvtColor(crop_img, cv2.COLOR_BGR2GRAY)
-
-    # 1. Detect bright text (white / light gray)
-    _, light_mask = cv2.threshold(gray, 175, 255, cv2.THRESH_BINARY)
-
-    # 2. Detect yellow / warm subtitle text in HSV
     hsv = cv2.cvtColor(crop_img, cv2.COLOR_BGR2HSV)
-    yellow_mask = cv2.inRange(hsv, np.array([15, 60, 130]), np.array([38, 255, 255]))
 
-    # Combine detections
-    combined = cv2.bitwise_or(light_mask, yellow_mask)
+    # 1. Detect yellow / warm subtitle text in HSV
+    yellow_mask = cv2.inRange(hsv, np.array([16, 65, 110]), np.array([38, 255, 255]))
 
-    # Fallback to Otsu if very low pixel count
-    if np.sum(combined > 0) < 40:
-        _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        combined = otsu
+    # 2. Detect crisp white subtitle text (low saturation, very high brightness)
+    white_mask = cv2.inRange(hsv, np.array([0, 0, 225]), np.array([180, 40, 255]))
 
-    # If still negligible text, return blank
-    if np.sum(combined > 0) < 40:
-        return np.zeros_like(gray)
+    # 3. Detect high-contrast bright text against background
+    text_cores = cv2.bitwise_or(yellow_mask, white_mask)
 
-    # 3. Morphological close to bridge adjacent characters horizontally
-    k_connect = cv2.getStructuringElement(cv2.MORPH_RECT, (17, 7))
-    connected = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, k_connect)
+    # If no core text detected, check if there is general high-saturation subtitle text
+    if np.sum(text_cores > 0) < 50:
+        sat_text = cv2.inRange(hsv, np.array([0, 100, 140]), np.array([180, 255, 255]))
+        if np.sum(sat_text > 0) > 80:
+            text_cores = sat_text
 
-    # 4. Group text components using convex hulls to eliminate letter outline gaps
-    contours, _ = cv2.findContours(connected, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    mask = np.zeros_like(gray)
-    for c in contours:
-        area = cv2.contourArea(c)
-        if area > 80:
-            hull = cv2.convexHull(c)
-            cv2.drawContours(mask, [hull], -1, 255, -1)
+    # If still no text detected in strip, return zero mask (do not inpaint clean background!)
+    if np.sum(text_cores > 0) < 50:
+        return np.zeros((h, w), dtype=np.uint8)
 
-    # 5. Expand hull mask with smooth margin to swallow black outlines & shadows
-    k_size = max(5, dilation_radius | 1)
-    k_expand = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
-    dilated_mask = cv2.dilate(mask, k_expand, iterations=1)
+    # 4. Extract black stroke/outline directly attached to text characters
+    black = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 255, 80]))
 
-    return dilated_mask
+    k_stroke = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    dilated_cores = cv2.dilate(text_cores, k_stroke, iterations=2)
+    attached_stroke = cv2.bitwise_and(black, dilated_cores)
+
+    # Combine text cores and their black stroke
+    full_text = cv2.bitwise_or(text_cores, attached_stroke)
+
+    # 5. Seal internal character loops (e.g. inside Chinese characters like 国, 面, 日, 口)
+    k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    closed_text = cv2.morphologyEx(full_text, cv2.MORPH_CLOSE, k_close)
+
+    # 6. Smooth dilation to cleanly swallow anti-aliased edges and drop shadows
+    rad = max(5, dilation_radius | 1)
+    k_margin = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (rad, rad))
+    final_mask = cv2.dilate(closed_text, k_margin, iterations=1)
+
+    return final_mask
 
 
 def feather_blend(
     original: np.ndarray,
     inpainted: np.ndarray,
     mask: np.ndarray,
-    blur_ksize: int = 9,
+    blur_ksize: int = 7,
 ) -> np.ndarray:
     """Blend inpainted pixels seamlessly into the original strip using Gaussian feathering."""
     if mask is None or mask.max() == 0:

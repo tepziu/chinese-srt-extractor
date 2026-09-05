@@ -92,17 +92,22 @@ def detect_device():
 DEVICE, COMPUTE_TYPE = detect_device()
 print(f"Device: {DEVICE.upper()} | Compute: {COMPUTE_TYPE}")
 
-MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(2 * 1024 * 1024 * 1024)))
-MAX_DOWNLOAD_BYTES = int(os.getenv("MAX_DOWNLOAD_BYTES", str(2 * 1024 * 1024 * 1024)))
-MAX_VIDEO_DURATION_SECONDS = int(os.getenv("MAX_VIDEO_DURATION_SECONDS", "7200"))
+# File and duration limits (0 = Khong gioi han dung luong / thoi luong, ho tro file nang > 2GB)
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "0"))
+MAX_DOWNLOAD_BYTES = int(os.getenv("MAX_DOWNLOAD_BYTES", "0"))
+MAX_VIDEO_DURATION_SECONDS = int(os.getenv("MAX_VIDEO_DURATION_SECONDS", "0"))
+# Nguong tu dong tao visual proxy cho Gemini OCR de vuot gioi han 2GB cua Google API
+GEMINI_MAX_DIRECT_UPLOAD_BYTES = int(os.getenv("GEMINI_MAX_DIRECT_UPLOAD_BYTES", str(int(1.5 * 1024 * 1024 * 1024))))
 WEB_HOST = os.getenv("WEB_HOST", "127.0.0.1")
 WEB_PORT = int(os.getenv("WEB_PORT", "5000"))
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
 jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = threading.RLock()
 JOB_MAX_AGE_SECONDS = int(os.getenv("JOB_MAX_AGE_SECONDS", "3600"))
 JOB_MAX_COUNT = int(os.getenv("JOB_MAX_COUNT", "50"))
-FILE_MAX_AGE_SECONDS = int(os.getenv("FILE_MAX_AGE_SECONDS", "7200"))
+FILE_MAX_AGE_SECONDS = int(os.getenv("FILE_MAX_AGE_SECONDS", "14400"))
 _CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL_SECONDS", "1800"))
 _last_cleanup_time = 0.0
 _cleanup_thread: threading.Thread | None = None

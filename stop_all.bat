@@ -12,4 +12,4 @@ taskkill /FI "WINDOWTITLE eq Chinese SRT Extractor - Web*" /F >nul 2>&1
 taskkill /FI "WINDOWTITLE eq Chinese SRT Extractor - Telegram*" /F >nul 2>&1
 
 echo Hoan tat tat ca dich vu!
-timeout /t 2 >nul
+ping 127.0.0.1 -n 3 >nul

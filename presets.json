@@ -58,5 +58,22 @@
         "h_ratio": 0.05
       }
     ]
+  },
+  "douyin_top_title": {
+    "name": "Douyin dọc + Tiêu đề trên (Hook)",
+    "sub_region": {
+      "x_ratio": 0.08,
+      "y_ratio": 0.81,
+      "w_ratio": 0.84,
+      "h_ratio": 0.085
+    },
+    "extra_regions": [
+      {
+        "x_ratio": 0.05,
+        "y_ratio": 0.05,
+        "w_ratio": 0.9,
+        "h_ratio": 0.08
+      }
+    ]
   }
 }

@@ -7,6 +7,8 @@ import os
 import re
 import socket
 import subprocess
+import sys
+import shutil
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -39,7 +41,7 @@ def validate_download_url(url: str) -> tuple[bool, str]:
 
 
 def _check_download_size(size: int) -> None:
-    if size > MAX_DOWNLOAD_BYTES:
+    if MAX_DOWNLOAD_BYTES > 0 and size > MAX_DOWNLOAD_BYTES:
         raise RuntimeError(
             f"Video vượt giới hạn tải xuống ({MAX_DOWNLOAD_BYTES / 1024 / 1024:.0f} MB)"
         )
@@ -183,7 +185,7 @@ def download_with_ytdlp(job_id: str, url: str) -> str:
     ]
 
     info_cmd = base_cmd + ["--no-download", "--print", "title", url]
-    info_result = subprocess.run(info_cmd, capture_output=True, text=True, timeout=30)
+    info_result = subprocess.run(info_cmd, capture_output=True, text=True, timeout=60)
     if info_result.returncode == 0:
         title = info_result.stdout.strip().splitlines()[0] if info_result.stdout.strip() else "Video"
         jobs[job_id]["message"] = f"Đang tải: {title[:50]}..."
@@ -199,10 +201,10 @@ def download_with_ytdlp(job_id: str, url: str) -> str:
         "-o",
         output_template,
         "--no-playlist",
-        "--max-filesize",
-        "2G",
-        url,
     ]
+    if MAX_DOWNLOAD_BYTES > 0:
+        download_cmd.extend(["--max-filesize", f"{MAX_DOWNLOAD_BYTES}"])
+    download_cmd.append(url)
     log_path = job_dir / "yt-dlp.log"
     process = None
     try:
@@ -243,8 +245,68 @@ def download_with_ytdlp(job_id: str, url: str) -> str:
         jobs.get(job_id, {}).pop("_download_process", None)
 
 
+
+def download_douyin_master(job_id: str, url: str) -> str:
+    """Tải video Master gốc không nén chất lượng cao nhất trực tiếp từ CDN Douyin."""
+    spider_dir = Path(__file__).resolve().parent / "douyin_monitor" / "spider"
+    if spider_dir.exists() and str(spider_dir.resolve()) not in sys.path:
+        sys.path.insert(0, str(spider_dir.resolve()))
+
+    import requests as _requests
+    from services.douyin_monitor.crawler import get_douyin_auth, download_master_video
+    from dy_apis.douyin_api import DouyinAPI, parse_aweme_id
+
+    # 1. Trích xuất URL sạch nếu người dùng dán kèm cả đoạn văn bản chia sẻ của Douyin
+    clean_input = url.strip()
+    match = re.search(r'https?://[a-zA-Z0-9\.\-_/]+', clean_input)
+    if match:
+        clean_input = match.group(0)
+
+    # 2. Xử lý link rút gọn v.douyin.com -> redirect tới link video đầy đủ
+    if "v.douyin.com" in clean_input:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        }
+        r = _requests.get(clean_input, headers=headers, allow_redirects=True, timeout=10)
+        clean_input = r.url
+
+    aweme_id, canonical_url = parse_aweme_id(clean_input)
+    auth = get_douyin_auth(force_refresh_uifid=True)
+    if not auth:
+        raise RuntimeError("Không khởi tạo được Douyin Auth credentials từ .env")
+
+    jobs[job_id]["message"] = f"🛰️ Đang lấy thông tin video Douyin Master ({aweme_id})..."
+    jobs[job_id]["progress"] = 8
+
+    res = DouyinAPI.get_work_info(auth, canonical_url)
+    aweme_detail = res.get("aweme_detail") if isinstance(res, dict) else None
+    if not aweme_detail:
+        raise RuntimeError(f"Không lấy được thông tin chi tiết của video Douyin ({aweme_id})")
+
+    title = (aweme_detail.get("desc") or f"douyin_{aweme_id}").strip()[:80]
+    jobs[job_id]["original_name"] = title
+    jobs[job_id]["message"] = f"⬇️ Đang tải video gốc Master Douyin: {title[:40]}..."
+    jobs[job_id]["progress"] = 12
+
+    dest_dir = _job_dir(job_id)
+    downloaded_file = download_master_video(aweme_detail, dest_dir)
+    if not downloaded_file or not os.path.exists(downloaded_file):
+        raise RuntimeError("Không thể tải file video gốc Master từ Douyin CDN")
+
+    target_video = dest_dir / "source.mp4"
+    if str(Path(downloaded_file).resolve()) != str(target_video.resolve()):
+        shutil.copy2(downloaded_file, target_video)
+
+    _check_download_size(target_video.stat().st_size)
+    file_size = target_video.stat().st_size
+    jobs[job_id]["progress"] = 20
+    jobs[job_id]["message"] = f"Đã tải xong video Master Douyin ({file_size / 1048576:.1f}MB)"
+    print(f"✅ [Downloader] Đã tải thành công Master video Douyin: {target_video} ({file_size / 1048576:.1f}MB)")
+    return str(target_video)
+
+
 def download_from_url(job_id: str, url: str) -> str:
-    """Download from URL, selecting browser mode for Chinese platforms."""
+    """Download from URL, ưu tiên dùng Douyin Master API cho các link Douyin."""
     valid, error = validate_download_url(url)
     if not valid:
         raise ValueError(error)
@@ -252,6 +314,16 @@ def download_from_url(job_id: str, url: str) -> str:
     jobs[job_id]["message"] = "Đang phân tích URL..."
     jobs[job_id]["progress"] = 3
 
+    # 1. Nếu là link Douyin, tải trực tiếp file gốc Master không nén qua Douyin Spider API
+    is_douyin = any(domain in url.lower() for domain in ("douyin.com", "iesdouyin.com", "v.douyin.com"))
+    if is_douyin:
+        try:
+            return download_douyin_master(job_id, url)
+        except Exception as exc:
+            print(f"[Downloader] Douyin Master API thất bại ({exc}), chuyển sang cơ chế dự phòng...")
+            jobs[job_id]["message"] = "Douyin Master API gặp lỗi, chuyển sang cơ chế dự phòng..."
+
+    # 2. Đối với các nền tảng khác hoặc khi Douyin Master API dự phòng
     use_browser = any(domain in url.lower() for domain in CHINESE_DOMAINS)
     try:
         if use_browser:

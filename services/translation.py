@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
-
-import json
 from pathlib import Path
-from config import AI_DEFAULT_MODEL, AI_LANG_NAMES, AI_TRANSLATE_CONFIG, DEFAULT_TRANSLATION_MODE, LANGUAGES, OUTPUT_FOLDER, TRANSLATION_MODES, jobs
+
+from config import (
+    AI_DEFAULT_MODEL,
+    AI_LANG_NAMES,
+    AI_TRANSLATE_CONFIG,
+    DEFAULT_TRANSLATION_MODE,
+    LANGUAGES,
+    OUTPUT_FOLDER,
+    TRANSLATION_MODES,
+    jobs,
+)
 from services.srt_utils import parse_srt, parse_srt_timing, validate_srt
 
 _NUMBERED_LINE = re.compile(r"^\s*(\d+)[.)]\s*(?:\[([A-Za-z0-9_]+)\]|\(([A-Za-z0-9_]+)\))?\s*(.*?)\s*$")
@@ -64,6 +73,7 @@ def _fallback_google(batch: list, translated_map: dict, start_i: int, target_lan
 def _auto_compress_long_lines(
     client,
     model: str,
+    target_lang: str,
     lang_name: str,
     long_items: list[tuple[int, str, str, int, float]],
     translated_map: dict[int, str],
@@ -74,33 +84,62 @@ def _auto_compress_long_lines(
     if not long_items:
         return
 
-    compress_lines = []
-    for offset, (idx, spk, curr_text, max_w, dur_s) in enumerate(long_items):
-        compress_lines.append(
-            f"{offset + 1}. [Thời lượng: {dur_s}s | BẮT BUỘC TỐI ĐA {max_w} TỪ] [{spk}] {curr_text}"
-        )
-    if translation_mode == "driving":
-        sys_prompt = f"Bạn là chuyên gia biên tập lời thuyết minh dạy lái xe tiếng {lang_name} siêu ngắn gọn, dứt khoát và chuẩn kỹ thuật."
-        compress_prompt = (
-            f"Các câu hướng dẫn mẹo lái xe tiếng {lang_name} sau đây đang bị QUÁ DÀI so với thời lượng thao tác trong video.\n"
-            f"Hãy viết lại từng câu thành MỘT CÂU HƯỚNG DẪN NGẮN GỌN HƠN, dứt khoát, chuẩn thuật ngữ lái xe/ô tô, giữ nguyên 100% ý chính và chỉ dẫn kỹ thuật.\n"
-            "QUY TẮC:\n"
-            "1. BẮT BUỘC KHÔNG VƯỢT QUÁ số từ tối đa đã ghi trong ngoặc.\n"
-            "2. BẮT BUỘC giữ nguyên mã [M1] ở đầu câu (đây là video 1 người nói).\n"
-            "3. Chỉ trả về danh sách đánh số, KHÔNG giải thích thêm.\n\n"
-            + "\n".join(compress_lines)
-        )
+    if target_lang == "en":
+        compress_lines = []
+        for offset, (idx, spk, curr_text, max_w, dur_s) in enumerate(long_items):
+            compress_lines.append(
+                f"{offset + 1}. [Duration: {dur_s}s | STRICT MAX {max_w} WORDS] [{spk}] {curr_text}"
+            )
+        if translation_mode == "driving":
+            sys_prompt = "You are an expert editor of concise American English driving instructions."
+            compress_prompt = (
+                "The following English driving instructions are TOO LONG for the video action duration.\n"
+                "Rewrite each line into a SHORTER, punchy driving instruction, keeping 100% of the technical guidance.\n"
+                "RULES:\n"
+                "1. DO NOT exceed the maximum word limit in brackets.\n"
+                "2. Keep the [M1] speaker tag at the start.\n"
+                "3. Return ONLY the numbered list, no extra commentary.\n\n"
+                + "\n".join(compress_lines)
+            )
+        else:
+            sys_prompt = "You are an expert subtitle and dialogue editor for English movies and drama."
+            compress_prompt = (
+                "The following English subtitle lines are TOO LONG for the speaking duration.\n"
+                "Rewrite each line into a SHORTER line, natural and concise, preserving meaning and character voice.\n"
+                "RULES:\n"
+                "1. DO NOT exceed the maximum word limit in brackets.\n"
+                "2. Keep character tags [M1], [F1], [M2], [F2], [N] at the start.\n"
+                "3. Return ONLY the numbered list, no extra commentary.\n\n"
+                + "\n".join(compress_lines)
+            )
     else:
-        sys_prompt = f"Bạn là chuyên gia biên tập rút gọn lời thoại phim {lang_name} siêu ngắn gọn và tự nhiên."
-        compress_prompt = (
-            f"Các câu thoại tiếng {lang_name} sau đây đang bị QUÁ DÀI so với thời lượng nhân vật nói trong video.\n"
-            f"Hãy viết lại từng câu thành MỘT CÂU NGẮN GỌN HƠN, xúc tích, giữ nguyên 100% ý chính và xưng hô.\n"
-            "QUY TẮC:\n"
-            "1. BẮT BUỘC KHÔNG VƯỢT QUÁ số từ tối đa đã ghi trong ngoặc.\n"
-            "2. Giữ nguyên mã nhân vật [M1], [F1], [M2], [F2], [N] ở đầu câu.\n"
-            "3. Chỉ trả về danh sách đánh số, KHÔNG giải thích thêm.\n\n"
-            + "\n".join(compress_lines)
-        )
+        compress_lines = []
+        for offset, (idx, spk, curr_text, max_w, dur_s) in enumerate(long_items):
+            compress_lines.append(
+                f"{offset + 1}. [Thời lượng: {dur_s}s | BẮT BUỘC TỐI ĐA {max_w} TỪ] [{spk}] {curr_text}"
+            )
+        if translation_mode == "driving":
+            sys_prompt = f"Bạn là chuyên gia biên tập lời thuyết minh dạy lái xe tiếng {lang_name} siêu ngắn gọn, dứt khoát và chuẩn kỹ thuật."
+            compress_prompt = (
+                f"Các câu hướng dẫn mẹo lái xe tiếng {lang_name} sau đây đang bị QUÁ DÀI so với thời lượng thao tác trong video.\n"
+                f"Hãy viết lại từng câu thành MỘT CÂU HƯỚNG DẪN NGẮN GỌN HƠN, dứt khoát, chuẩn thuật ngữ lái xe/ô tô, giữ nguyên 100% ý chính và chỉ dẫn kỹ thuật.\n"
+                "QUY TẮC:\n"
+                "1. BẮT BUỘC KHÔNG VƯỢT QUÁ số từ tối đa đã ghi trong ngoặc.\n"
+                "2. BẮT BUỘC giữ nguyên mã [M1] ở đầu câu (đây là video 1 người nói).\n"
+                "3. Chỉ trả về danh sách đánh số, KHÔNG giải thích thêm.\n\n"
+                + "\n".join(compress_lines)
+            )
+        else:
+            sys_prompt = f"Bạn là chuyên gia biên tập rút gọn lời thoại phim {lang_name} siêu ngắn gọn và tự nhiên."
+            compress_prompt = (
+                f"Các câu thoại tiếng {lang_name} sau đây đang bị QUÁ DÀI so với thời lượng nhân vật nói trong video.\n"
+                f"Hãy viết lại từng câu thành MỘT CÂU NGẮN GỌN HƠN, xúc tích, giữ nguyên 100% ý chính và xưng hô.\n"
+                "QUY TẮC:\n"
+                "1. BẮT BUỘC KHÔNG VƯỢT QUÁ số từ tối đa đã ghi trong ngoặc.\n"
+                "2. Giữ nguyên mã nhân vật [M1], [F1], [M2], [F2], [N] ở đầu câu.\n"
+                "3. Chỉ trả về danh sách đánh số, KHÔNG giải thích thêm.\n\n"
+                + "\n".join(compress_lines)
+            )
 
     try:
         response = client.chat.completions.create(
@@ -116,7 +155,6 @@ def _auto_compress_long_lines(
         for offset, (idx, orig_spk, orig_text, max_w, dur_s) in enumerate(long_items):
             if offset in parsed_comp:
                 new_text = parsed_comp[offset]
-                # If compressed text is actually shorter, apply it!
                 if len(new_text.split()) < len(orig_text.split()):
                     print(f"  ✨ Auto-compressed line {idx+1}: '{orig_text}' ({len(orig_text.split())} words) -> '{new_text}' ({len(new_text.split())} words, max {max_w})")
                     translated_map[idx] = new_text
@@ -137,8 +175,11 @@ def translate_srt_ai(srt_content: str, target_lang: str, job_id: str, ai_model: 
         return srt_content
     if target_lang not in LANGUAGES:
         raise ValueError(f"Ngôn ngữ không được hỗ trợ: {target_lang}")
-    if not AI_TRANSLATE_CONFIG["api_key"]:
-        raise RuntimeError("AI translation API key chưa được cấu hình")
+    if not AI_TRANSLATE_CONFIG.get("api_key"):
+        print(f"⚠️ Chưa cấu hình AI translation API key, tự động chuyển sang Google Translate cho {target_lang}")
+        if jobs.get(job_id):
+            jobs[job_id]["message"] = f"Chưa có AI key, đang dịch bằng Google Translate ({LANGUAGES[target_lang]['name']})..."
+        return translate_srt(srt_content, target_lang, job_id)
 
     mode = translation_mode or jobs.get(job_id, {}).get("translation_mode") or DEFAULT_TRANSLATION_MODE
     if mode not in TRANSLATION_MODES:
@@ -151,6 +192,8 @@ def translate_srt_ai(srt_content: str, target_lang: str, job_id: str, ai_model: 
     lang_name = AI_LANG_NAMES.get(target_lang, target_lang)
 
     # Parse timing to compute accurate available duration and target word budget
+    # Speaking rate: 2.6 words/sec for English, 3.4 words/sec for Vietnamese
+    rate = 2.6 if target_lang == "en" else 3.4
     timings = parse_srt_timing(srt_content)
     durations = {}
     word_budgets = {}
@@ -160,8 +203,7 @@ def translate_srt_ai(srt_content: str, target_lang: str, job_id: str, ai_model: 
         avail_ms = next_s_ms - s_ms
         avail_s = max(0.8, round(avail_ms / 1000, 1))
         durations[i] = avail_s
-        # 3.2 words/second is standard comfortable speaking rate for Vietnamese
-        word_budgets[i] = max(2, int(avail_s * 3.2))
+        word_budgets[i] = max(2, int(avail_s * rate))
 
     batch_size = 15
     batches = [(start, entries[start : start + batch_size]) for start in range(0, len(entries), batch_size)]
@@ -177,88 +219,124 @@ def translate_srt_ai(srt_content: str, target_lang: str, job_id: str, ai_model: 
             idx = start_i + offset
             dur_s = durations.get(idx, 2.0)
             max_w = word_budgets.get(idx, 6)
-            dur_info = f"[Thời lượng: {dur_s}s | TỐI ĐA: {max_w} TỪ]"
+            dur_info = f"[Thời lượng: {dur_s}s | TỐI ĐA: {max_w} TỪ]" if target_lang != "en" else f"[Duration: {dur_s}s | MAX: {max_w} WORDS]"
             numbered_lines.append(f"{offset + 1}. {dur_info} {entry[2]}")
         numbered_text = "\n".join(numbered_lines)
 
-        if mode == "driving":
-            sys_prompt = (
-                f"Bạn là chuyên gia đào tạo lái xe ô tô và biên tập viên video mẹo lái xe thực chiến Trung - {lang_name}. "
-                f"Bạn chuyên dịch lời thoại hướng dẫn kỹ thuật lái xe, mẹo lái xe an toàn, căn đường, đỗ xe ngắn gọn, "
-                f"dứt khoát, trực quan và chuẩn xác thuật ngữ chuyên ngành ô tô."
-            )
-            prompt = (
-                f"Bạn là chuyên gia dịch thuật video dạy lái xe và mẹo lái xe ô tô chuyên nghiệp (Trung sang {lang_name}).\n"
-                f"Hãy dịch các câu thuyết minh tiếng Trung sau sang {lang_name} theo phong cách hướng dẫn lái xe thực tế, dứt khoát, dễ hiểu.\n\n"
-                "QUY TẮC BẮT BUỘC:\n"
-                "1. ĐỒNG NHẤT 1 NGƯỜI NÓI [M1]:\n"
-                "   - Đây là video do 1 người hướng dẫn / thầy dạy lái xe thuyết minh duy nhất.\n"
-                "   - BẮT BUỘC gắn mã [M1] ở đầu MỌI câu dịch (Ví dụ: '1. [M1] Khi lùi chuồng, nhìn gương chiếu hậu trái...').\n"
-                "   - TUYỆT ĐỐI KHÔNG dùng F1, M2, F2 vì video chỉ có một người nói duy nhất.\n"
-                "2. THUẬT NGỮ LÁI XE & Ô TÔ CHUẨN XÁC:\n"
-                "   - Sử dụng chính xác thuật ngữ kỹ thuật lái xe và giao thông của người Việt:\n"
-                "     * Thao tác: côn, ga, phanh (chân phanh, phanh tay), cần số, về số N, số D, số R, số P.\n"
-                "     * Vô lăng: đánh lái, trả lái, đánh kịch lái (hết lái), đánh chết lái, giữ thẳng lái, ôm cua.\n"
-                "     * Điểm chuẩn: gương chiếu hậu (gương trái/phải/giữa), góc chữ A, điểm mù, vạch kẻ đường, vỉa hè, bó vỉa, tim đường.\n"
-                "     * Đỗ xe: ghép chuồng dọc (lùi chuồng), ghép chuồng ngang (đỗ song song), de xe, tiến/lùi.\n"
-                "     * Tín hiệu: xi-nhan, gạt mưa, đèn pha/cốt, đèn cảnh báo nguy hiểm (hazard).\n"
-                "3. VĂN PHONG HƯỚNG DẪN DỨT KHOÁT, THỰC CHIẾN:\n"
-                "   - Dùng các câu ngắn, dứt khoát, nhắm thẳng vào hành động và quan sát ('Hãy quan sát...', 'Lập tức phanh...', 'Căn chuẩn vỉa hè...').\n"
-                "   - Xưng hô phù hợp video hướng dẫn: dùng lối nói trực tiếp hoặc 'chúng ta', 'bạn', 'các bác', 'anh em'. Tuyệt đối TRÁNH xưng hô tình cảm sướt mướt kiểu phim truyền hình (anh/em, tiểu thư, công tử,...).\n"
-                "4. NGÂN SÁCH SỐ TỪ: BẮT BUỘC KHÔNG VƯỢT QUÁ số từ tối đa trong ngoặc. Lời nói phải khớp thời lượng thao tác trên hình ảnh, KHÔNG ĐƯỢC TRÀN TIẾNG.\n"
-                "5. ĐỊNH DẠNG: Chỉ trả về danh sách đánh số theo mẫu: '1. [M1] Lời dịch', KHÔNG giải thích thêm.\n\n"
-                f"{numbered_text}"
-            )
+        if target_lang == "en":
+            if mode == "driving":
+                sys_prompt = (
+                    "You are an expert automotive driving instructor and short-video translator (Chinese to English). "
+                    "You specialize in translating driving techniques, safety tips, and parking maneuvers into "
+                    "concise, clear, and direct American English driving instructions."
+                )
+                prompt = (
+                    "Translate the following Chinese driving tutorial lines into English.\n"
+                    "Style: Direct, action-oriented, natural American driving lesson instructions.\n\n"
+                    "STRICT RULES:\n"
+                    "1. SINGLE SPEAKER [M1]: Every line MUST start with [M1] (e.g. '1. [M1] When parallel parking, check left mirror...'). DO NOT use F1, M2, F2.\n"
+                    "2. ACCURATE AUTOMOTIVE TERMINOLOGY:\n"
+                    "   - Controls: clutch, accelerator/gas, brake (foot brake, handbrake/parking brake), gear lever, shift to N/D/R/P.\n"
+                    "   - Steering: turn wheel, straighten wheel, full lock, counter-steer, steer into turn.\n"
+                    "   - References: side mirror (left/right), rearview mirror, A-pillar, blind spot, curb, road line, lane divider.\n"
+                    "   - Parking: parallel parking, reverse perpendicular parking, pull in, back out.\n"
+                    "   - Signals: turn signal, wiper, headlights, hazard lights.\n"
+                    "3. PUNCHY IMPERATIVE STYLE: Use short, direct commands ('Check your mirror', 'Turn full lock right', 'Brake gently'). Avoid wordiness.\n"
+                    "4. WORD BUDGET: Strictly stay under the maximum word count specified in brackets. Spoken lines must fit the video action duration.\n"
+                    "5. FORMAT: Return ONLY the numbered list '1. [M1] Translation', no commentary.\n\n"
+                    f"{numbered_text}"
+                )
+            else:
+                sys_prompt = (
+                    "You are a professional movie subtitle translator and dialogue adaptor (Chinese to English). "
+                    "You excel at natural conversational American English and strict timing budgeting."
+                )
+                prompt = (
+                    "Translate the following Chinese dialogue lines into natural English for movie subtitles/dubbing.\n\n"
+                    "STRICT RULES:\n"
+                    "1. SPEAKER TAGS: Start every line with the detected character code:\n"
+                    "   - [M1] = Male Lead\n"
+                    "   - [F1] = Female Lead\n"
+                    "   - [M2] = Male Secondary / Antagonist\n"
+                    "   - [F2] = Female Secondary\n"
+                    "   - [N]  = Narrator / Voiceover\n"
+                    "2. NATURAL CONVERSATIONAL ENGLISH: Sound like real native speakers in a movie or drama. "
+                    "Never translate word-for-word (avoid Chinglish). Use natural contractions (I'm, don't, we'll).\n"
+                    "3. WORD BUDGET: Strictly stay under the maximum word count specified in brackets. Do not overflow.\n"
+                    "4. FORMAT: Return ONLY the numbered list '1. [M1] Dialogue', no commentary.\n\n"
+                    f"{numbered_text}"
+                )
         else:
-            sys_prompt = f"Bạn là dịch giả phụ đề phim Trung - {lang_name} xuất sắc, chuyên gia khống chế độ dài câu thoại."
-            prompt = (
-                f"Bạn là chuyên gia dịch thuật phụ đề và lồng tiếng phim chuyên nghiệp (Trung sang {lang_name}).\n"
-                f"Hãy dịch các câu thoại tiếng Trung sau sang {lang_name} tự nhiên, đúng ngữ cảnh đối thoại.\n\n"
-                "QUY TẮC BẮT BUỘC:\n"
-                "1. PHÂN VAI NHÂN VẬT: Gắn mã nhân vật vào đầu mỗi câu dịch:\n"
-                "   - [M1] = Nam chính\n"
-                "   - [F1] = Nữ chính\n"
-                "   - [M2] = Nam phụ\n"
-                "   - [F2] = Nữ phụ\n"
-                "   - [N]  = Dẫn chuyện / Thuyết minh\n"
-                "2. NGÂN SÁCH SỐ TỪ: BẮT BUỘC KHÔNG ĐƯỢC VƯỢT QUÁ số từ tối đa ghi trong ngoặc. Dịch cô đọng, súc tích, gãy gọn để khi lồng tiếng đọc vừa khít thời lượng, KHÔNG BỊ TRÀN TIẾNG.\n"
-                "3. ĐỊNH DẠNG: Chỉ trả về các dòng đánh số tương ứng với số thứ tự, KHÔNG giải thích thêm.\n\n"
-                f"{numbered_text}"
-            )
+            if mode == "driving":
+                sys_prompt = (
+                    f"Bạn là chuyên gia đào tạo lái xe ô tô và biên tập viên video mẹo lái xe thực chiến Trung - {lang_name}. "
+                    f"Bạn chuyên dịch lời thoại hướng dẫn kỹ thuật lái xe, mẹo lái xe an toàn, căn đường, đỗ xe ngắn gọn, "
+                    f"dứt khoát, trực quan và chuẩn xác thuật ngữ chuyên ngành ô tô."
+                )
+                prompt = (
+                    f"Bạn là chuyên gia dịch thuật video dạy lái xe và mẹo lái xe ô tô chuyên nghiệp (Trung sang {lang_name}).\n"
+                    f"Hãy dịch các câu thuyết minh tiếng Trung sau sang {lang_name} theo phong cách hướng dẫn lái xe thực tế, dứt khoát, dễ hiểu.\n\n"
+                    "QUY TẮC BẮT BUỘC:\n"
+                    "1. ĐỒNG NHẤT 1 NGƯỜI NÓI [M1]:\n"
+                    "   - Đây là video do 1 người hướng dẫn / thầy dạy lái xe thuyết minh duy nhất.\n"
+                    "   - BẮT BUỘC gắn mã [M1] ở đầu MỌI câu dịch (Ví dụ: '1. [M1] Khi lùi chuồng, nhìn gương chiếu hậu trái...').\n"
+                    "   - TUYỆT ĐỐI KHÔNG dùng F1, M2, F2 vì video chỉ có một người nói duy nhất.\n"
+                    "2. THUẬT NGỮ LÁI XE & Ô TÔ CHUẨN XÁC:\n"
+                    "   - Sử dụng chính xác thuật ngữ kỹ thuật lái xe và giao thông của người Việt:\n"
+                    "     * Thao tác: côn, ga, phanh (chân phanh, phanh tay), cần số, về số N, số D, số R, số P.\n"
+                    "     * Vô lăng: đánh lái, trả lái, đánh kịch lái (hết lái), đánh chết lái, giữ thẳng lái, ôm cua.\n"
+                    "     * Điểm chuẩn: gương chiếu hậu (gương trái/phải/giữa), góc chữ A, điểm mù, vạch kẻ đường, vỉa hè, bó vỉa, tim đường.\n"
+                    "     * Đỗ xe: ghép chuồng dọc (lùi chuồng), ghép chuồng ngang (đỗ song song), de xe, tiến/lùi.\n"
+                    "     * Tín hiệu: xi-nhan, gạt mưa, đèn pha/cốt, đèn cảnh báo nguy hiểm (hazard).\n"
+                    "3. VĂN PHONG HƯỚNG DẪN DỨT KHOÁT, THỰC CHIẾN:\n"
+                    "   - Dùng các câu ngắn, dứt khoát, nhắm thẳng vào hành động và quan sát ('Hãy quan sát...', 'Lập tức phanh...', 'Căn chuẩn vỉa hè...').\n"
+                    "   - Xưng hô phù hợp video hướng dẫn: dùng lối nói trực tiếp hoặc 'chúng ta', 'bạn', 'các bác', 'anh em'. Tuyệt đối TRÁNH xưng hô tình cảm sướt mướt kiểu phim truyền hình (anh/em, tiểu thư, công tử,...).\n"
+                    "4. NGÂN SÁCH SỐ TỪ: BẮT BUỘC KHÔNG VƯỢT QUÁ số từ tối đa trong ngoặc. Lời nói phải khớp thời lượng thao tác trên hình ảnh, KHÔNG ĐƯỢC TRÀN TIẾNG.\n"
+                    "5. ĐỊNH DẠNG: Chỉ trả về danh sách đánh số theo mẫu: '1. [M1] Lời dịch', KHÔNG giải thích thêm.\n\n"
+                    f"{numbered_text}"
+                )
+            else:
+                sys_prompt = f"Bạn là dịch giả phụ đề phim Trung - {lang_name} xuất sắc, chuyên gia khống chế độ dài câu thoại."
+                prompt = (
+                    f"Bạn là chuyên gia dịch thuật phụ đề và lồng tiếng phim chuyên nghiệp (Trung sang {lang_name}).\n"
+                    f"Hãy dịch các câu thoại tiếng Trung sau sang {lang_name} tự nhiên, đúng ngữ cảnh đối thoại.\n\n"
+                    "QUY TẮC BẮT BUỘC:\n"
+                    "1. PHÂN VAI NHÂN VẬT: Gắn mã nhân vật vào đầu mỗi câu dịch:\n"
+                    "   - [M1] = Nam chính\n"
+                    "   - [F1] = Nữ chính\n"
+                    "   - [M2] = Nam phụ / Phản diện\n"
+                    "   - [F2] = Nữ phụ\n"
+                    "   - [N]  = Dẫn chuyện / Thuyết minh\n"
+                    "2. XƯNG HÔ LINH HOẠT & TỰ NHIÊN: Tự động đoán quan hệ nhân vật qua ngữ cảnh thoại để xưng hô (anh - em, tôi - cô, mẹ - con, cậu - tớ...).\n"
+                    "3. NGÂN SÁCH SỐ TỪ: BẮT BUỘC KHÔNG VƯỢT QUÁ số từ tối đa trong ngoặc. Phải rút gọn câu thật súc tích, lược bỏ từ đệm thừa, giữ trọn vẹn 100% ý chính.\n"
+                    "4. ĐỊNH DẠNG: Chỉ trả về danh sách đánh số theo mẫu: '1. [M1] Lời thoại', KHÔNG giải thích thêm.\n\n"
+                    f"{numbered_text}"
+                )
 
         parsed_text = {}
         parsed_spk = {}
-        last_error = None
-        for attempt in range(3):
-            try:
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": sys_prompt},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0.3,
-                    max_tokens=2500,
-                )
-                parsed_text, parsed_spk = _parse_numbered_result(
-                    response.choices[0].message.content, len(batch)
-                )
-                if len(parsed_text) != len(batch):
-                    missing = sorted(set(range(len(batch))) - set(parsed_text))
-                    raise RuntimeError(f"AI trả thiếu dòng: {missing}")
-                break
-            except Exception as exc:
-                last_error = exc
-                if attempt < 2:
-                    time.sleep(2 ** attempt)
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                max_tokens=2500,
+            )
+            raw_content = response.choices[0].message.content
+            parsed_text, parsed_spk = _parse_numbered_result(raw_content, len(batch))
+        except Exception as exc:
+            print(f"Batch {batch_number} AI translation failed ({exc}); using Google fallback")
 
-        if len(parsed_text) != len(batch):
-            print(f"AI batch {batch_number} failed ({last_error}); falling back to Google")
+        if len(parsed_text) < len(batch):
+            missing_offsets = [off for off in range(len(batch)) if off not in parsed_text]
+            print(f"  Batch {batch_number} missing {len(missing_offsets)} lines from AI, filling with Google Translate...")
             _fallback_google(batch, translated_map, start_i, target_lang)
             for offset in range(len(batch)):
                 speaker_map[start_i + offset] = "M1"
         else:
-            # Check for any line that exceeded its word budget by > 30%
             long_items_in_batch = []
             for offset, text in parsed_text.items():
                 idx = start_i + offset
@@ -272,16 +350,14 @@ def translate_srt_ai(srt_content: str, target_lang: str, job_id: str, ai_model: 
                 if words_count > max(max_allowed + 2, int(max_allowed * 1.35)):
                     long_items_in_batch.append((idx, spk, text, max_allowed, dur_s))
 
-            # Trigger Adaptive Auto-Compress if needed
             if long_items_in_batch:
-                _auto_compress_long_lines(client, model, lang_name, long_items_in_batch, translated_map, speaker_map, translation_mode=mode)
+                _auto_compress_long_lines(client, model, target_lang, lang_name, long_items_in_batch, translated_map, speaker_map, translation_mode=mode)
 
         progress = min(int(batch_number / len(batches) * 100), 99)
         jobs[job_id].setdefault("translate_progress", {})[target_lang] = progress
         mode_label = TRANSLATION_MODES.get(mode, {}).get("name", mode)
         jobs[job_id]["message"] = f"AI ({model} | {mode_label}) đang dịch sang {LANGUAGES[target_lang]['name']}: {progress}%"
 
-    # Save detected speakers into job
     speaker_counts = {}
     segment_speakers = []
     for idx in range(len(entries)):
@@ -357,7 +433,6 @@ def translate_srt(srt_content: str, target_lang: str, job_id: str) -> str:
         jobs[job_id].setdefault("translate_progress", {})[target_lang] = progress
         jobs[job_id]["message"] = f"Đang dịch sang {LANGUAGES[target_lang]['name']}: {progress}%"
 
-    # Default all to M1 for Google translate
     jobs[job_id]["speakers"] = {"M1": len(entries)}
     jobs[job_id]["segment_speakers"] = ["M1"] * len(entries)
 

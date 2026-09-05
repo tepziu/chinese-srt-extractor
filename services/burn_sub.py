@@ -199,6 +199,8 @@ def _srt_to_ass(
     play_res_x: int,
     play_res_y: int,
     sub_region: dict,
+    extra_ass_styles: list[str] | None = None,
+    extra_ass_events: list[str] | None = None,
 ) -> str:
     """Convert SRT to ASS with styling fitted cleanly inside the tight sub_region."""
     from services.srt_utils import parse_srt
@@ -206,9 +208,9 @@ def _srt_to_ass(
     entries = parse_srt(srt_content)
 
     sub_x = int(play_res_x * sub_region.get("x_ratio", 0.08))
-    sub_y = int(play_res_y * sub_region.get("y_ratio", 0.81))
+    sub_y = int(play_res_y * sub_region.get("y_ratio", 0.86))
     sub_w = int(play_res_x * sub_region.get("w_ratio", 0.84))
-    sub_h = int(play_res_y * sub_region.get("h_ratio", 0.085))
+    sub_h = int(play_res_y * sub_region.get("h_ratio", 0.09))
 
     # Standard readable font size (proportional to resolution)
     font_size = max(20, min(56, int(play_res_y * 0.038)))
@@ -220,6 +222,13 @@ def _srt_to_ass(
     margin_l = max(int(play_res_x * 0.04), sub_x)
     margin_r = max(int(play_res_x * 0.04), play_res_x - sub_x - sub_w)
 
+    styles_list = [
+        f"Style: BurnSub,Arial,{font_size},&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0.5,0,1,3.0,1.2,8,{margin_l},{margin_r},{margin_top},1"
+    ]
+    if extra_ass_styles:
+        styles_list.extend(extra_ass_styles)
+    styles_block = "\n".join(styles_list)
+
     ass_header = f"""[Script Info]
 Title: Burned Subtitle
 ScriptType: v4.00+
@@ -230,13 +239,15 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: BurnSub,Arial,{font_size},&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0.5,0,1,3.0,1.2,8,{margin_l},{margin_r},{margin_top},1
+{styles_block}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     ass_lines = [ass_header.strip()]
+    if extra_ass_events:
+        ass_lines.extend(extra_ass_events)
 
     for _srt_idx, timestamp, text in entries:
         parts = timestamp.split(' --> ')
@@ -248,16 +259,31 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         start_ass = start_t[:-1] if len(start_t) > 10 else start_t
         end_ass = end_t[:-1] if len(end_t) > 10 else end_t
 
-        clean_text = text.replace(chr(10), r'\N').replace(chr(13), '')
+        clean = text.replace("\r", "").strip()
+        # Smart line balancing: wrap into 2 lines if long
+        if "\n" not in clean and len(clean) > 36:
+            words = clean.split()
+            if len(words) >= 3:
+                mid = len(clean) // 2
+                best_i = 0
+                min_dist = 999
+                curr = 0
+                for w_idx in range(len(words) - 1):
+                    curr += len(words[w_idx]) + 1
+                    if abs(curr - mid) < min_dist:
+                        min_dist = abs(curr - mid)
+                        best_i = w_idx
+                clean = " ".join(words[:best_i + 1]) + r"\N" + " ".join(words[best_i + 1:])
+            else:
+                clean = clean.replace("\n", r"\N")
+        else:
+            clean = clean.replace("\n", r"\N")
+
         ass_lines.append(
-            f"Dialogue: 0,{start_ass},{end_ass},BurnSub,,0,0,0,,{clean_text}"
+            f"Dialogue: 0,{start_ass},{end_ass},BurnSub,,0,0,0,,{clean}"
         )
 
-    return '\n'.join(ass_lines) + '\n'
-
-
-
-
+    return '\n'.join(ass_lines) + '\n\n\n'
 def extract_subtitle_intervals(
     srt_content: str,
     min_gap: float = 1.20,
@@ -382,6 +408,16 @@ def burn_sub_video(
     extra_regions: list = None,
     render_mode: str = "blur",
     inpaint_engine: str = "opencv",
+    trim_intro: str = "off",
+    translate_title: bool = False,
+    title_lang: str = "vi",
+    brand_name: str = "",
+    bgm_mode: str = "auto",
+    bgm_volume: float = 0.8,
+    clean_hardsub: bool = True,
+    clean_logo: bool = False,
+    clean_title: bool = False,
+    burn_new_sub: bool = True,
 ):
     """Burn translated subtitle into video with tight bounding box and feathered edge blur."""
     burn_key = f"burn_{lang}"
@@ -392,8 +428,10 @@ def burn_sub_video(
         "message": "Đang chuẩn bị...",
     }
 
-    video_file = jobs[job_id].get("video_file", {})
-    video_path = video_file.get("path", "")
+    video_file = jobs[job_id].get("video_file")
+    video_path = video_file.get("path", "") if isinstance(video_file, dict) else ""
+    if not video_path:
+        video_path = str(jobs[job_id].get("video_path", ""))
 
     if not video_path or not os.path.exists(video_path):
         raise RuntimeError("Không tìm thấy video gốc")
@@ -409,7 +447,7 @@ def burn_sub_video(
         ],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=60,
     )
 
     vw, vh = 720, 1280
@@ -428,20 +466,110 @@ def burn_sub_video(
     if total_duration == 0:
         total_duration = float(jobs[job_id].get("duration", 60) or 60)
 
-    # Subtitle region: custom / preset / auto-detect
-    if sub_region and "y_ratio" in sub_region:
-        pass
-    else:
-        jobs[job_id][burn_key]["message"] = "🔍 Đang tự động quét vị trí hardsub..."
+    # Step 1: Intro cover trimming if requested (skip if already trimmed at ingest stage)
+    trimmed_video_path = None
+    already_trimmed = float(jobs.get(job_id, {}).get("trimmed_seconds", 0) or 0) > 0.05
+    if not already_trimmed and trim_intro and trim_intro != "off":
+        from services.video.trimmer import detect_intro_cover, trim_video_and_shift_srt
+        trim_sec = 0.0
+        if trim_intro == "auto":
+            jobs[job_id][burn_key]["message"] = "✂️ Đang phát hiện bìa/intro đầu video..."
+            trim_sec = detect_intro_cover(video_path, srt_content=srt_content)
+        else:
+            try:
+                trim_sec = float(trim_intro)
+            except ValueError:
+                trim_sec = 0.0
+
+        if trim_sec > 0.05:
+            jobs[job_id][burn_key]["message"] = f"✂️ Đang cắt bỏ {trim_sec:.2f}s bìa đầu video..."
+            trim_out = str(OUTPUT_FOLDER / f"{job_id}_trimmed.mp4")
+            video_path, shifted_srt = trim_video_and_shift_srt(video_path, trim_sec, trim_out, srt_content)
+            trimmed_video_path = trim_out
+            if shifted_srt:
+                srt_content = shifted_srt
+
+    # Build modular regions based on user choices:
+    # 1. Hardsub region (bottom dialogue subtitles)
+    method = "manual"
+    if not (sub_region and "y_ratio" in sub_region):
+        jobs[job_id][burn_key]["message"] = "🔍 Đang quét vị trí hardsub..."
         jobs[job_id][burn_key]["progress"] = 20
         sub_region = detect_hardsub_region(video_path, job_id, srt_content=srt_content)
+        method = sub_region.get("method", "ocr_detected")
 
-    # Route to AI Inpainting if requested
+    all_blur_regions = []
+    if clean_hardsub:
+        all_blur_regions.append(sub_region)
+
+    # 2. Logo / Watermark regions (corners)
+    if clean_logo:
+        if extra_regions:
+            for r in extra_regions[:MAX_BLUR_REGIONS - 1]:
+                if isinstance(r, dict) and "y_ratio" in r:
+                    all_blur_regions.append(r)
+        else:
+            all_blur_regions.append({"x_ratio": 0.65, "y_ratio": 0.01, "w_ratio": 0.34, "h_ratio": 0.055})
+
+    extra_ass_styles = []
+    extra_ass_events = []
+
+    # 3. Top Title Banner (detection, inpainting, and translation)
+    if clean_title or translate_title:
+        from services.video.title_detector import detect_top_title, translate_title, generate_title_ass_style_and_event
+        jobs[job_id][burn_key]["message"] = "🏷️ Đang quét tiêu đề trên video..."
+        top_title = detect_top_title(video_path)
+        if top_title and top_title.get("text"):
+            all_blur_regions.append({
+                "x_ratio": top_title["x_ratio"],
+                "y_ratio": top_title["y_ratio"],
+                "w_ratio": top_title["w_ratio"],
+                "h_ratio": top_title["h_ratio"],
+            })
+            if translate_title:
+                translated_title = translate_title(top_title["text"], target_lang=title_lang)
+                if translated_title:
+                    t_style, t_event = generate_title_ass_style_and_event(
+                        translated_title, vw, vh, y_ratio=top_title["y_ratio"], duration_sec=min(8.0, total_duration)
+                    )
+                    extra_ass_styles.append(t_style)
+                    extra_ass_events.append(t_event)
+
+    # 4. Brand Watermark
+    if brand_name and str(brand_name).strip():
+        brand_clean = str(brand_name).strip().replace("\n", "").replace("\\", "")
+        b_font_size = max(18, min(36, int(vh * 0.026)))
+        b_style = f"Style: BrandWatermark,Arial,{b_font_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H70000000,-1,0,0,0,100,100,0,0,1,2.0,1.0,7,30,30,25,1"
+        b_event = f"Dialogue: 2,0:00:00.00,9:59:59.00,BrandWatermark,,0,0,0,,{brand_clean}"
+        extra_ass_styles.append(b_style)
+        extra_ass_events.append(b_event)
+
+    # Check TTS voiceover & BGM mixing
+    tts_key = f"tts_{lang}"
+    tts_info = jobs[job_id].get(tts_key, {})
+    tts_path = tts_info.get("path", "") if tts_info.get("status") == "done" else ""
+    has_tts = tts_path and os.path.exists(tts_path)
+
+    audio_to_mux = tts_path
+    if has_tts and bgm_mode != "none":
+        from services.audio_mixer import mix_voiceover_with_bgm
+        jobs[job_id][burn_key]["message"] = "🎵 Đang xử lý và trộn nhạc nền (BGM)..."
+        mixed_audio_file = str(OUTPUT_FOLDER / job_id / f"final_mixed_{lang}.m4a")
+        try:
+            audio_to_mux = mix_voiceover_with_bgm(
+                video_path=video_path,
+                tts_audio_path=tts_path,
+                output_audio_path=mixed_audio_file,
+                job_id=job_id,
+                bgm_mode=bgm_mode,
+                bgm_volume=bgm_volume,
+            )
+        except Exception as exc:
+            print(f"Warning: BGM mix failed ({exc}), using raw voiceover")
+            audio_to_mux = tts_path
+
+    # Route to AI Inpainting if requested (Clean Plate or Inpaint & Re-burn)
     if render_mode in ("clean", "inpaint_burn"):
-        tts_key = f"tts_{lang}"
-        tts_info = jobs[job_id].get(tts_key, {})
-        tts_path = tts_info.get("path", "") if tts_info.get("status") == "done" else ""
-        has_tts = tts_path and os.path.exists(tts_path)
 
         output_dir = OUTPUT_FOLDER / job_id
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -450,10 +578,16 @@ def burn_sub_video(
 
         re_burn_ass = None
         if render_mode == "inpaint_burn":
-            ass_content = _srt_to_ass(srt_content, vw, vh, sub_region)
+            ass_content = _srt_to_ass(
+                srt_content, vw, vh, sub_region,
+                extra_ass_styles=extra_ass_styles,
+                extra_ass_events=extra_ass_events,
+            )
             ass_path = OUTPUT_FOLDER / f"{job_id}_burn_{lang}.ass"
             ass_path.write_text(ass_content, encoding="utf-8-sig")
             re_burn_ass = str(ass_path)
+
+        extra_inpaint = all_blur_regions[1:] if len(all_blur_regions) > 1 else None
 
         from services.video.clean_pipeline import clean_video_pipeline
         return clean_video_pipeline(
@@ -465,22 +599,9 @@ def burn_sub_video(
             burn_key=burn_key,
             engine=inpaint_engine,
             re_burn_ass_path=re_burn_ass,
-            tts_audio_path=tts_path if has_tts else None,
+            tts_audio_path=audio_to_mux if has_tts else None,
+            extra_regions=extra_inpaint,
         )
-    method = "manual"
-    if sub_region and "y_ratio" in sub_region:
-        print(f"🎬 Dùng vùng sub chỉ định: {sub_region}")
-    else:
-        jobs[job_id][burn_key]["message"] = "🔍 Đang tự động quét vị trí hardsub..."
-        jobs[job_id][burn_key]["progress"] = 20
-        sub_region = detect_hardsub_region(video_path, job_id, srt_content=srt_content)
-        method = sub_region.get("method", "ocr_detected")
-
-    all_blur_regions = [sub_region]
-    if extra_regions:
-        for r in extra_regions[:MAX_BLUR_REGIONS - 1]:
-            if isinstance(r, dict) and "y_ratio" in r:
-                all_blur_regions.append(r)
 
     # Output path
     output_dir = OUTPUT_FOLDER / job_id
@@ -490,12 +611,95 @@ def burn_sub_video(
     jobs[job_id][burn_key]["message"] = "🎬 Đang tạo phụ đề ASS..."
     jobs[job_id][burn_key]["progress"] = 45
 
-    ass_content = _srt_to_ass(srt_content, vw, vh, sub_region)
+    ass_content = _srt_to_ass(
+        srt_content, vw, vh, sub_region,
+        extra_ass_styles=extra_ass_styles,
+        extra_ass_events=extra_ass_events,
+    )
     ass_path = OUTPUT_FOLDER / f"{job_id}_burn_{lang}.ass"
     ass_path.write_text(ass_content, encoding='utf-8-sig')
 
     region_count = len(all_blur_regions)
     print(f"🎬 ASS created: {vw}x{vh}, {region_count} blur region(s), method={method}")
+
+    # Handle Pure Burn mode (without blur background)
+    if render_mode == "pure_burn":
+        ass_escaped = str(ass_path).replace(chr(92), "/").replace(":", r"\:")
+        video_codec = ['-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '22', '-b:v', '0'] if DEVICE == "cuda" else ['-c:v', 'libx264', '-preset', 'fast', '-crf', '20']
+        if has_tts:
+            fc = f"[0:v]ass='{ass_escaped}'[vout];[1:a]apad[aout]"
+            amap = ['-map', '[vout]', '-map', '[aout]', '-c:a', 'aac', '-b:a', '192k']
+            cmd_pure = ['ffmpeg', '-y', '-i', video_path, '-i', audio_to_mux, '-filter_complex', fc, *amap, *video_codec, '-shortest', output_path]
+        else:
+            fc = f"[0:v]ass='{ass_escaped}'[vout]"
+            amap = ['-map', '[vout]', '-map', '0:a?', '-c:a', 'copy']
+            cmd_pure = ['ffmpeg', '-y', '-i', video_path, '-filter_complex', fc, *amap, *video_codec, output_path]
+
+        jobs[job_id][burn_key]["message"] = "🎬 Đang in phụ đề trực tiếp lên video..."
+        jobs[job_id][burn_key]["progress"] = 50
+
+        stderr_log = str(OUTPUT_FOLDER / f"{job_id}_pure_burn_{lang}_ffmpeg.log")
+        try:
+            with open(stderr_log, 'w', encoding='utf-8') as log_f:
+                process = subprocess.Popen(cmd_pure, stdout=subprocess.DEVNULL, stderr=log_f)
+                jobs[job_id]["_ffmpeg_process"] = process
+
+                while process.poll() is None:
+                    if jobs.get(job_id, {}).get("cancel"):
+                        process.terminate()
+                        raise RuntimeError("Đã hủy (Stop)")
+
+                    try:
+                        with open(stderr_log, 'r', encoding='utf-8', errors='replace') as f:
+                            f.seek(0, 2)
+                            size = f.tell()
+                            f.seek(max(0, size - 2000))
+                            last_output = f.read()
+
+                            matches = re.findall(r"time=(\d{2}):(\d{2}):(\d{2}\.\d{2})", last_output)
+                            if matches and total_duration > 0:
+                                h, m, s = matches[-1]
+                                current_sec = int(h) * 3600 + int(m) * 60 + float(s)
+
+                                pct = int((current_sec / total_duration) * 100)
+                                prog = 50 + int((current_sec / total_duration) * 45)
+                                jobs[job_id][burn_key]["progress"] = min(prog, 95)
+
+                                speed_match = re.findall(r"speed=\s*([\d\.]+)x", last_output)
+                                speed_str = f" ({speed_match[-1]}x)" if speed_match else ""
+                                jobs[job_id][burn_key]["message"] = (
+                                    f"🎬 Đang in sub: {pct}% ({h}:{m}:{int(float(s)):02d}/{int(total_duration//60)}:{int(total_duration%60):02d}){speed_str}"
+                                )
+                    except Exception:
+                        pass
+                    time.sleep(1)
+
+            if process.returncode != 0:
+                with open(stderr_log, 'r', encoding='utf-8', errors='replace') as f:
+                    err = f.read()[-500:]
+                raise RuntimeError(f"FFmpeg error: {err or 'Lỗi burn sub trực tiếp'}")
+        finally:
+            jobs.get(job_id, {}).pop("_ffmpeg_process", None)
+            try: ass_path.unlink(missing_ok=True)
+            except OSError: pass
+            try: Path(stderr_log).unlink(missing_ok=True)
+            except OSError: pass
+
+        if not os.path.exists(output_path):
+            raise RuntimeError("Output video not created")
+        file_size = os.path.getsize(output_path)
+        jobs[job_id][burn_key] = {
+            "status": "done",
+            "progress": 100,
+            "message": f"Hoàn thành ({file_size / 1048576:.1f}MB) • In sub mới trực tiếp",
+            "path": output_path,
+            "filename": f"{jobs[job_id].get('original_name', 'video')[:30]}_{lang}_sub.mp4",
+            "size": file_size,
+            "duration": round(total_duration, 1),
+            "method": "pure_burn",
+            "audio_replaced": has_tts,
+        }
+        return jobs[job_id][burn_key]
 
     jobs[job_id][burn_key]["message"] = f"🎬 Đang burn ({region_count} vùng blur viền mềm)..."
     jobs[job_id][burn_key]["progress"] = 50
@@ -528,6 +732,8 @@ def burn_sub_video(
         mask_input_start=mask_start_idx,
         timeline_enable=timeline_enable,
     )
+    if has_tts:
+        filter_complex += ";[1:a]apad[aout]" 
 
     filter_script_path = OUTPUT_FOLDER / f"{job_id}_filter_{lang}.txt"
     filter_script_path.write_text(filter_complex, encoding='utf-8')
@@ -538,13 +744,13 @@ def burn_sub_video(
         video_codec = ['-c:v', 'libx264', '-preset', 'fast', '-crf', '20']
 
     if has_tts:
-        audio_map = ['-map', '[vout]', '-map', '1:a']
+        audio_map = ['-map', '[vout]', '-map', '[aout]', '-c:a', 'aac', '-b:a', '192k']
     else:
-        audio_map = ['-map', '[vout]', '-map', '0:a', '-c:a', 'copy']
+        audio_map = ['-map', '[vout]', '-map', '0:a?', '-c:a', 'copy']
 
     cmd = [
         'ffmpeg', '-y', '-i', video_path,
-        *(['-i', tts_path] if has_tts else []),
+        *(['-i', audio_to_mux] if has_tts else []),
         *mask_args,
         '-filter_complex_script', str(filter_script_path),
         *audio_map,
@@ -651,6 +857,11 @@ def burn_sub_video(
                 filter_script_path.unlink(missing_ok=True)
         except OSError:
             pass
+        try:
+            if 'trimmed_video_path' in locals() and trimmed_video_path:
+                Path(trimmed_video_path).unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def burnsub_worker(
@@ -661,11 +872,25 @@ def burnsub_worker(
     extra_regions: list = None,
     render_mode: str = "blur",
     inpaint_engine: str = "opencv",
+    trim_intro: str = "off",
+    translate_title: bool = False,
+    title_lang: str = "vi",
+    brand_name: str = "",
+    bgm_mode: str = "auto",
+    bgm_volume: float = 0.8,
+    clean_hardsub: bool = True,
+    clean_logo: bool = False,
+    clean_title: bool = False,
+    burn_new_sub: bool = True,
 ):
     """Background worker for burn subtitle"""
     burn_key = f"burn_{lang}"
     try:
-        burn_sub_video(job_id, lang, srt_content, sub_region, extra_regions, render_mode, inpaint_engine)
+        burn_sub_video(
+            job_id, lang, srt_content, sub_region, extra_regions,
+            render_mode, inpaint_engine, trim_intro, translate_title, title_lang, brand_name,
+            bgm_mode, bgm_volume, clean_hardsub, clean_logo, clean_title, burn_new_sub
+        )
     except Exception as e:
         if jobs.get(job_id):
             jobs[job_id][burn_key] = {

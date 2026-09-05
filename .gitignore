@@ -32,6 +32,7 @@ outputs/*
 *.wav
 *.flac
 *.aac
+*.m4a
 *.log
 
 # IDE & OS
@@ -46,3 +47,13 @@ models/*
 *.onnx
 *.pt
 *.bin
+# Runtime data & temp debug scripts
+config/downloaded_history.json
+config/monitor_channels.json
+config/telegram_notify_chat.json
+inspect_*.py
+patch_*.py
+reproduce_*.py
+run_complete_*.py
+test_burn_step.py
+test_fix_reproduce.py

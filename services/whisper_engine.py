@@ -61,7 +61,7 @@ def extract_audio(video_path: str, job_id: str) -> str:
         ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-print_format", "json", video_path],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=60,
     )
     try:
         video_duration = float(json.loads(probe.stdout)["format"]["duration"])
@@ -73,7 +73,7 @@ def extract_audio(video_path: str, job_id: str) -> str:
         "-acodec", "pcm_s16le", "-threads", str(min(os.cpu_count() or 4, 8)), audio_path,
     ]
     started = time.time()
-    process = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=600)
+    process = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=3600)
     elapsed = time.time() - started
     if process.returncode != 0:
         detail = process.stderr.decode("utf-8", errors="replace")[-800:]
@@ -162,6 +162,38 @@ def process_video(job_id: str, video_path: str, model_size: str, translate_langs
     translation_mode = translation_mode or job.get("translation_mode", "movie")
     job["translation_mode"] = translation_mode
     try:
+        # Step 0: Ingest cover trimming if requested
+        trim_intro = job.get("trim_intro", "auto")
+        if trim_intro and str(trim_intro).lower() != "off":
+            from services.video.trimmer import preprocess_trim_video
+            output_dir = OUTPUT_FOLDER / job_id
+            output_dir.mkdir(parents=True, exist_ok=True)
+            trimmed_dest = str(output_dir / "video_clean_cover.mp4")
+
+            job["message"] = "🔍 Đang kiểm tra bìa video..."
+            clean_video, trim_sec = preprocess_trim_video(
+                video_path,
+                output_path=trimmed_dest,
+                trim_mode=str(trim_intro),
+            )
+            if trim_sec > 0.05:
+                video_path = clean_video
+                job["trimmed_seconds"] = trim_sec
+                job["video_path"] = video_path
+                job["message"] = f"✂️ Đã cắt bỏ {trim_sec:.2f}s bìa tiếng Trung đầu video"
+                print(f"✂️ Job {job_id}: Cut {trim_sec:.2f}s intro cover with Chinese text")
+            else:
+                job["trimmed_seconds"] = 0.0
+        else:
+            job["trimmed_seconds"] = 0.0
+
+        if Path(video_path).exists():
+            job["video_file"] = {
+                "path": str(video_path),
+                "filename": Path(video_path).name,
+                "size": Path(video_path).stat().st_size,
+            }
+
         audio_path = extract_audio(video_path, job_id)
         job["status"] = "loading_model"
         job["message"] = f"Đang tải AI model trên {DEVICE.upper()}..."

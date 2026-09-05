@@ -8,7 +8,9 @@ import uuid
 import time
 import subprocess
 import threading
+import shutil
 from pathlib import Path
+from typing import Any
 
 from flask import Blueprint, request, jsonify, send_file, make_response
 
@@ -64,14 +66,14 @@ def _video_info(path: str) -> dict:
 def _validate_media_path(path: Path) -> tuple[bool, str]:
     try:
         size = path.stat().st_size
-        if size > MAX_UPLOAD_BYTES:
+        if MAX_UPLOAD_BYTES > 0 and size > MAX_UPLOAD_BYTES:
             return False, f"File quá lớn ({MAX_UPLOAD_BYTES / 1024 / 1024:.0f} MB tối đa)"
         probe = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-print_format", "json", str(path)],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=60,
         )
         duration = float(json.loads(probe.stdout)["format"]["duration"])
-        if duration > MAX_VIDEO_DURATION_SECONDS:
+        if MAX_VIDEO_DURATION_SECONDS > 0 and duration > MAX_VIDEO_DURATION_SECONDS:
             return False, f"Video quá dài ({MAX_VIDEO_DURATION_SECONDS // 3600} giờ tối đa)"
         return True, ""
     except (OSError, subprocess.SubprocessError, KeyError, TypeError, ValueError, json.JSONDecodeError):
@@ -98,6 +100,9 @@ def device_info():
         "device": DEVICE.upper(),
         "compute_type": COMPUTE_TYPE,
         "cpu_threads": os.cpu_count() or 4,
+        "max_upload_bytes": MAX_UPLOAD_BYTES,
+        "unlimited_upload": MAX_UPLOAD_BYTES <= 0,
+        "max_duration_seconds": MAX_VIDEO_DURATION_SECONDS,
     }
     if DEVICE == "cuda":
         try:
@@ -153,6 +158,7 @@ def upload_video():
     if translation_mode not in TRANSLATION_MODES:
         translation_mode = DEFAULT_TRANSLATION_MODE
 
+    trim_intro = request.form.get("trim_intro", "auto")
     create_job(
         job_id,
         original_name=str(video.filename),
@@ -161,6 +167,7 @@ def upload_video():
         translate_method=translate_method,
         translation_mode=translation_mode,
         ai_model=ai_model,
+        trim_intro=trim_intro,
     )
 
     cleanup_old_jobs()
@@ -173,6 +180,278 @@ def upload_video():
     thread.start()
 
     return jsonify({"job_id": job_id, "status": "queued"})
+
+
+
+# ── Chunked Upload (Phân đoạn xử lý file lớn / không giới hạn > 2GB) ──────────
+
+_chunk_lock = threading.RLock()
+_chunk_uploads: dict[str, dict[str, Any]] = {}
+
+
+def _cleanup_expired_chunk_sessions():
+    now = time.time()
+    with _chunk_lock:
+        expired = [
+            jid for jid, sess in _chunk_uploads.items()
+            if now - sess.get("created_at", 0) > 7200
+        ]
+        for jid in expired:
+            _chunk_uploads.pop(jid, None)
+
+
+@api_bp.route("/api/upload/init", methods=["POST"])
+def upload_init():
+    """Khởi tạo phiên upload phân đoạn (chunked upload) cho file bất kỳ kích thước."""
+    _cleanup_expired_chunk_sessions()
+    data = request.get_json(silent=True) or request.form.to_dict()
+    filename = str(data.get("filename", "")).strip()
+    if not filename:
+        return jsonify({"error": "Chưa cung cấp tên file"}), 400
+    ext = Path(filename).suffix.lower()
+    if ext not in ALLOWED_VIDEO_EXTENSIONS:
+        return jsonify({"error": f"Định dạng {ext or 'không xác định'} không được hỗ trợ"}), 400
+
+    try:
+        total_size = int(data.get("total_size", 0))
+    except (ValueError, TypeError):
+        total_size = 0
+
+    if MAX_UPLOAD_BYTES > 0 and total_size > MAX_UPLOAD_BYTES:
+        return jsonify({"error": f"File vượt giới hạn cho phép ({MAX_UPLOAD_BYTES / 1024 / 1024:.0f} MB)"}), 400
+
+    try:
+        chunk_size = int(data.get("chunk_size", 20 * 1024 * 1024))
+    except (ValueError, TypeError):
+        chunk_size = 20 * 1024 * 1024
+
+    if chunk_size <= 0:
+        chunk_size = 20 * 1024 * 1024
+
+    try:
+        total_chunks = int(data.get("total_chunks", 0))
+    except (ValueError, TypeError):
+        total_chunks = 0
+
+    if total_chunks <= 0:
+        total_chunks = max(1, (total_size + chunk_size - 1) // chunk_size) if total_size > 0 else 1
+
+    job_id = uuid.uuid4().hex[:12]
+    job_dir = UPLOAD_FOLDER / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    video_path = job_dir / f"source{ext}"
+
+    # Tạo trước file rỗng
+    with open(video_path, "wb") as f:
+        pass
+
+    with _chunk_lock:
+        _chunk_uploads[job_id] = {
+            "job_id": job_id,
+            "filename": filename,
+            "ext": ext,
+            "video_path": str(video_path),
+            "total_size": total_size,
+            "chunk_size": chunk_size,
+            "total_chunks": total_chunks,
+            "received_chunks": set(),
+            "created_at": time.time(),
+            "metadata": dict(data),
+        }
+
+    return jsonify({
+        "job_id": job_id,
+        "chunk_size": chunk_size,
+        "total_chunks": total_chunks,
+        "status": "initialized",
+    })
+
+
+@api_bp.route("/api/upload/chunk", methods=["POST"])
+def upload_chunk():
+    """Nhận và ghi một phần dữ liệu (chunk) trực tiếp vào file đĩa."""
+    job_id = request.form.get("job_id", "").strip()
+    if not job_id:
+        return jsonify({"error": "Thiếu job_id"}), 400
+
+    with _chunk_lock:
+        session = _chunk_uploads.get(job_id)
+    if not session:
+        return jsonify({"error": "Phiên upload không tồn tại hoặc đã hết hạn"}), 404
+
+    try:
+        chunk_index = int(request.form.get("chunk_index", -1))
+    except (ValueError, TypeError):
+        return jsonify({"error": "chunk_index không hợp lệ"}), 400
+
+    if chunk_index < 0 or chunk_index >= session["total_chunks"]:
+        return jsonify({"error": f"chunk_index {chunk_index} ngoài phạm vi (0..{session['total_chunks']-1})"}), 400
+
+    if "chunk" not in request.files:
+        return jsonify({"error": "Thiếu dữ liệu chunk"}), 400
+
+    chunk_file = request.files["chunk"]
+    chunk_bytes = chunk_file.read()
+
+    chunk_size = session["chunk_size"]
+    video_path = Path(session["video_path"])
+    offset = chunk_index * chunk_size
+
+    try:
+        with open(video_path, "r+b" if video_path.exists() else "wb") as f:
+            f.seek(offset)
+            f.write(chunk_bytes)
+    except Exception as e:
+        return jsonify({"error": f"Lỗi ghi chunk: {e}"}), 500
+
+    with _chunk_lock:
+        session["received_chunks"].add(chunk_index)
+        received_count = len(session["received_chunks"])
+
+    return jsonify({
+        "job_id": job_id,
+        "chunk_index": chunk_index,
+        "received_chunks": received_count,
+        "total_chunks": session["total_chunks"],
+        "status": "ok",
+    })
+
+
+@api_bp.route("/api/upload/finish", methods=["POST"])
+def upload_finish():
+    """Kiểm tra toàn vẹn file sau upload phân đoạn và bắt đầu tiến trình xử lý."""
+    data = request.get_json(silent=True) or request.form.to_dict()
+    job_id = str(data.get("job_id", "")).strip()
+    if not job_id:
+        return jsonify({"error": "Thiếu job_id"}), 400
+
+    with _chunk_lock:
+        session = _chunk_uploads.pop(job_id, None)
+    if not session:
+        return jsonify({"error": "Phiên upload không tồn tại hoặc đã hoàn tất"}), 404
+
+    total_chunks = session["total_chunks"]
+    missing_chunks = set(range(total_chunks)) - session["received_chunks"]
+    if missing_chunks:
+        return jsonify({
+            "error": f"Chưa nhận đủ dữ liệu. Thiếu {len(missing_chunks)} phần ({sorted(list(missing_chunks))[:10]})"
+        }), 400
+
+    video_path = Path(session["video_path"])
+    if not video_path.exists() or (session["total_size"] > 0 and video_path.stat().st_size == 0):
+        return jsonify({"error": "File sau khi ghép rỗng hoặc không hợp lệ"}), 400
+
+    valid_media, media_error = _validate_media_path(video_path)
+    if not valid_media:
+        video_path.unlink(missing_ok=True)
+        return jsonify({"error": media_error}), 400
+
+    meta = session.get("metadata", {})
+    upload_type = meta.get("upload_type", "whisper")
+
+    if upload_type == "hardsub":
+        gemini_model = meta.get("gemini_model", GEMINI_DEFAULT_MODEL)
+        gemini_api_key = str(meta.get("gemini_api_key", "")).strip()
+        if gemini_api_key:
+            set_gemini_api_key(gemini_api_key)
+        else:
+            gemini_api_key = get_gemini_api_key()
+
+        if not gemini_api_key:
+            return jsonify({"error": "Chưa có Gemini API Key"}), 400
+
+        translate_langs = _parse_languages(meta.get("translate_langs", "[]"))
+        ai_model = meta.get("ai_model", AI_DEFAULT_MODEL)
+        if ai_model not in AI_TRANSLATE_MODELS and not str(ai_model).strip():
+            ai_model = AI_DEFAULT_MODEL
+        translate_method = meta.get("translate_method", "google")
+        if translate_method not in ("ai", "google"):
+            translate_method = "google"
+        if gemini_model not in GEMINI_MODELS:
+            gemini_model = GEMINI_DEFAULT_MODEL
+
+        translation_mode = meta.get("translation_mode", DEFAULT_TRANSLATION_MODE)
+        if translation_mode not in TRANSLATION_MODES:
+            translation_mode = DEFAULT_TRANSLATION_MODE
+
+        trim_intro = meta.get("trim_intro", "auto")
+        create_job(
+            job_id,
+            original_name=session["filename"],
+            video_path=str(video_path),
+            video_file=_video_info(str(video_path)),
+            gemini_api_key=gemini_api_key,
+            gemini_model=gemini_model,
+            translate_langs=translate_langs,
+            translate_method=translate_method,
+            translation_mode=translation_mode,
+            ai_model=ai_model,
+            trim_intro=trim_intro,
+        )
+
+        cleanup_old_jobs()
+        job = get_job(job_id)
+        thread = threading.Thread(target=hardsub_worker, args=(job,), daemon=True)
+        thread.start()
+        return jsonify({"job_id": job_id, "status": "queued"})
+    else:
+        model_size = meta.get("model_size", "large-v3-turbo")
+        if model_size not in VALID_MODELS:
+            model_size = "large-v3-turbo"
+
+        translate_langs = _parse_languages(meta.get("translate_langs", "[]"))
+        ai_model = meta.get("ai_model", AI_DEFAULT_MODEL)
+        if ai_model not in AI_TRANSLATE_MODELS and not str(ai_model).strip():
+            ai_model = AI_DEFAULT_MODEL
+        translate_method = meta.get("translate_method", "ai")
+        if translate_method not in ("ai", "google"):
+            translate_method = "ai"
+        translation_mode = meta.get("translation_mode", DEFAULT_TRANSLATION_MODE)
+        if translation_mode not in TRANSLATION_MODES:
+            translation_mode = DEFAULT_TRANSLATION_MODE
+
+        trim_intro = meta.get("trim_intro", "auto")
+        create_job(
+            job_id,
+            original_name=session["filename"],
+            video_path=str(video_path),
+            translate_langs=translate_langs,
+            translate_method=translate_method,
+            translation_mode=translation_mode,
+            ai_model=ai_model,
+            trim_intro=trim_intro,
+        )
+
+        cleanup_old_jobs()
+        thread = threading.Thread(
+            target=process_video,
+            args=(job_id, str(video_path), model_size, translate_langs, translate_method, translation_mode),
+            daemon=True,
+        )
+        thread.start()
+        return jsonify({"job_id": job_id, "status": "queued"})
+
+
+@api_bp.route("/api/upload/cancel", methods=["POST"])
+def upload_cancel():
+    data = request.get_json(silent=True) or request.form.to_dict()
+    job_id = str(data.get("job_id", "")).strip()
+    if not job_id:
+        return jsonify({"error": "Thiếu job_id"}), 400
+
+    with _chunk_lock:
+        session = _chunk_uploads.pop(job_id, None)
+
+    if session:
+        v_path = Path(session.get("video_path", ""))
+        v_path.unlink(missing_ok=True)
+        if v_path.parent.exists():
+            try:
+                shutil.rmtree(v_path.parent)
+            except Exception:
+                pass
+        return jsonify({"status": "cancelled", "job_id": job_id})
+    return jsonify({"status": "not_found", "job_id": job_id})
 
 
 # ── URL Download ───────────────────────────────────────────────────────────
@@ -216,6 +495,7 @@ def url_download():
     jobs[job_id]["translate_method"] = translate_method
     jobs[job_id]["translation_mode"] = translation_mode
     jobs[job_id]["ai_model"] = ai_model
+    jobs[job_id]["trim_intro"] = data.get("trim_intro", "auto")
 
     thread = threading.Thread(
         target=process_url_video,
@@ -692,9 +972,26 @@ def trigger_burnsub(job_id, lang):
     if inpaint_engine not in ("opencv", "lama"):
         inpaint_engine = "opencv"
 
+    trim_intro = str(data.get("trim_intro", "auto")).lower().strip()
+    translate_title = bool(data.get("translate_title", False))
+    title_lang = str(data.get("title_lang", lang))
+    brand_name = str(data.get("brand_name", "")).strip()
+    bgm_mode = str(data.get("bgm_mode", "auto")).lower().strip()
+    try:
+        bgm_volume = float(data.get("bgm_volume", 0.8))
+    except (ValueError, TypeError):
+        bgm_volume = 0.8
+
+    clean_hardsub = bool(data.get("clean_hardsub", True))
+    clean_logo = bool(data.get("clean_logo", False))
+    clean_title = bool(data.get("clean_title", False))
+    burn_new_sub = bool(data.get("burn_new_sub", True))
+    if lang == "clean":
+        burn_new_sub = False
+
     thread = threading.Thread(
         target=burnsub_worker,
-        args=(job_id, lang, srt_content, sub_region, extra_regions, render_mode, inpaint_engine),
+        args=(job_id, lang, srt_content, sub_region, extra_regions, render_mode, inpaint_engine, trim_intro, translate_title, title_lang, brand_name, bgm_mode, bgm_volume, clean_hardsub, clean_logo, clean_title, burn_new_sub),
         daemon=True,
     )
     thread.start()
@@ -758,7 +1055,7 @@ def delete_preset(key):
 def download_burned_video(job_id, lang):
     job = get_job(job_id)
     video_path = ""
-    download_filename = f"video_{lang}_sub.mp4"
+    download_filename = f"video_clean.mp4" if lang == "clean" else f"video_{lang}_sub.mp4"
 
     if job:
         burn_key = f"burn_{lang}"
@@ -898,6 +1195,7 @@ def start_hardsub():
     if translation_mode not in TRANSLATION_MODES:
         translation_mode = DEFAULT_TRANSLATION_MODE
 
+    trim_intro = request.form.get("trim_intro", "auto")
     create_job(
         job_id,
         original_name=str(video.filename),
@@ -910,6 +1208,7 @@ def start_hardsub():
         translation_mode=translation_mode,
         ai_model=ai_model,
         mode="hardsub",
+        trim_intro=trim_intro,
     )
 
     cleanup_old_jobs()
@@ -973,6 +1272,7 @@ def start_hardsub_url():
         translation_mode=translation_mode,
         ai_model=ai_model,
         mode="hardsub",
+        trim_intro=data.get("trim_intro", "auto"),
     )
 
     cleanup_old_jobs()
@@ -1001,3 +1301,126 @@ def start_hardsub_url():
 
 
 
+
+
+# ── Douyin Channel Monitor Routes ──────────────────────────────────────────
+
+@api_bp.route("/api/douyin/channels", methods=["GET"])
+def get_douyin_channels():
+    from services.douyin_monitor import get_channels
+    return jsonify({"channels": get_channels()})
+
+
+@api_bp.route("/api/douyin/channels", methods=["POST"])
+def add_douyin_channel():
+    from services.douyin_monitor import add_channel, resolve_channel_sec_uid
+
+    data = request.get_json() or {}
+    channel_id = str(data.get("channel_id", "")).strip()
+    if not channel_id:
+        return jsonify({"error": "Channel ID không được để trống"}), 400
+
+    nickname = str(data.get("nickname", "")).strip()
+    sec_uid = str(data.get("sec_uid", "")).strip()
+    target_lang = str(data.get("target_lang", "vi")).strip()
+    style = str(data.get("style", "driving")).strip()
+    bgm_mode = str(data.get("bgm_mode", "ai")).strip()
+    auto_burn = bool(data.get("auto_burn", True))
+    clean_hardsub = bool(data.get("clean_hardsub", True))
+    clean_logo = bool(data.get("clean_logo", True))
+    translate_title = bool(data.get("translate_title", True))
+
+    if not sec_uid or sec_uid.startswith("MS4wLjABAAAA_rP") or len(sec_uid) < 30:
+        try:
+            resolved_uid, resolved_nick, meta = resolve_channel_sec_uid(channel_id)
+            if resolved_uid:
+                sec_uid = resolved_uid
+                if not nickname:
+                    nickname = resolved_nick or meta.get("nickname", channel_id)
+                if meta.get("unique_id"):
+                    channel_id = meta.get("unique_id")
+        except Exception as exc:
+            print(f"[API] Error resolving channel sec_uid: {exc}")
+
+    ch = add_channel(
+        channel_id=channel_id,
+        nickname=nickname,
+        sec_uid=sec_uid,
+        target_lang=target_lang,
+        style=style,
+        bgm_mode=bgm_mode,
+        auto_burn=auto_burn,
+        clean_hardsub=clean_hardsub,
+        clean_logo=clean_logo,
+        translate_title=translate_title,
+    )
+    return jsonify({"status": "success", "channel": ch})
+
+
+@api_bp.route("/api/douyin/channels/<channel_id>", methods=["DELETE"])
+def delete_douyin_channel(channel_id):
+    from services.douyin_monitor import remove_channel
+    success = remove_channel(channel_id)
+    return jsonify({"success": success})
+
+
+@api_bp.route("/api/douyin/channels/<channel_id>/toggle", methods=["POST"])
+def toggle_douyin_channel(channel_id):
+    from services.douyin_monitor import toggle_channel
+    data = request.get_json() or {}
+    enabled = bool(data.get("enabled", True))
+    success = toggle_channel(channel_id, enabled)
+    return jsonify({"success": success})
+
+
+@api_bp.route("/api/douyin/resolve", methods=["POST"])
+def resolve_douyin_channel():
+    from services.douyin_monitor import resolve_channel_sec_uid
+    data = request.get_json() or {}
+    channel_input = str(data.get("channel_input", "")).strip()
+    if not channel_input:
+        return jsonify({"error": "Vui lòng nhập Douyin ID hoặc link kênh"}), 400
+
+    sec_uid, nickname, meta = resolve_channel_sec_uid(channel_input)
+    if not sec_uid:
+        return jsonify({"error": "Không tìm thấy thông tin kênh"}), 404
+
+    return jsonify({
+        "sec_uid": sec_uid,
+        "nickname": nickname,
+        "meta": meta,
+    })
+
+
+@api_bp.route("/api/douyin/monitor/status", methods=["GET"])
+def get_douyin_monitor_status():
+    from services.douyin_monitor import get_monitor_status, get_channels, get_downloaded_history
+    status = get_monitor_status()
+    channels = get_channels()
+    history = get_downloaded_history()
+    status["total_channels"] = len(channels)
+    status["enabled_channels"] = len([c for c in channels if c.get("enabled")])
+    status["downloaded_count"] = len(history)
+    return jsonify(status)
+
+
+@api_bp.route("/api/douyin/monitor/toggle", methods=["POST"])
+def toggle_douyin_monitor():
+    from services.douyin_monitor import start_monitor, stop_monitor, get_monitor_status
+    data = request.get_json() or {}
+    enable = bool(data.get("enable", True))
+    interval = int(data.get("interval", 180))
+
+    if enable:
+        start_monitor(interval=interval)
+    else:
+        stop_monitor()
+
+    return jsonify(get_monitor_status())
+
+
+@api_bp.route("/api/douyin/monitor/scan", methods=["POST"])
+def scan_douyin_monitor():
+    from services.douyin_monitor import scan_now
+    res = scan_now()
+    return jsonify(res)

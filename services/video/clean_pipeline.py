@@ -32,6 +32,7 @@ def clean_video_pipeline(
     engine: str = "opencv",
     re_burn_ass_path: str | None = None,
     tts_audio_path: str | None = None,
+    extra_regions: list | None = None,
 ) -> dict:
     """Execute AI Clean Plate inpainting pipeline.
 
@@ -123,6 +124,23 @@ def clean_video_pipeline(
                     frame[sub_y : sub_y + sub_h, sub_x : sub_x + sub_w] = blended_strip
                     inpainted_count += 1
 
+            # Inpaint extra regions (e.g. top title card, logos)
+            if extra_regions:
+                for er in extra_regions:
+                    ey = int(height * er.get("y_ratio", 0))
+                    eh = int(height * er.get("h_ratio", 0.05))
+                    ex = int(width * er.get("x_ratio", 0))
+                    ew = int(width * er.get("w_ratio", 0.3))
+                    ey = max(0, min(ey, height - 4))
+                    eh = max(4, min(eh, height - ey))
+                    ex = max(0, min(ex, width - 4))
+                    ew = max(4, min(ew, width - ex))
+                    e_crop = frame[ey : ey + eh, ex : ex + ew]
+                    e_mask = generate_text_mask(e_crop, dilation_radius=10)
+                    if e_mask.max() > 0:
+                        e_inp = inpainter.inpaint(e_crop, e_mask)
+                        frame[ey : ey + eh, ex : ex + ew] = feather_blend(e_crop, e_inp, e_mask, blur_ksize=7)
+
             writer.write(frame)
             frame_idx += 1
 
@@ -147,14 +165,20 @@ def clean_video_pipeline(
     # FFmpeg final encoding with audio and optional new subtitle burn
     has_tts = tts_audio_path and os.path.exists(tts_audio_path)
     audio_inputs = ["-i", tts_audio_path] if has_tts else []
-    audio_map = ["-map", "1:a"] if has_tts else ["-map", "0:a?", "-c:a", "copy"]
+    audio_map = ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k"] if has_tts else ["-map", "1:a?", "-c:a", "copy"]
 
     filter_complex = []
     if re_burn_ass_path and os.path.exists(re_burn_ass_path):
         ass_esc = str(re_burn_ass_path).replace("\\", "/").replace(":", "\\:")
-        filter_complex = ["-filter_complex", f"[0:v]ass='{ass_esc}'[vout]", "-map", "[vout]"]
+        if has_tts:
+            filter_complex = ["-filter_complex", f"[0:v]ass='{ass_esc}'[vout];[1:a]apad[aout]", "-map", "[vout]"]
+        else:
+            filter_complex = ["-filter_complex", f"[0:v]ass='{ass_esc}'[vout]", "-map", "[vout]"]
     else:
-        filter_complex = ["-map", "0:v"]
+        if has_tts:
+            filter_complex = ["-filter_complex", "[1:a]apad[aout]", "-map", "0:v"]
+        else:
+            filter_complex = ["-map", "0:v"]
 
     if DEVICE == "cuda":
         video_codec = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "22", "-b:v", "0"]
@@ -172,7 +196,7 @@ def clean_video_pipeline(
         output_path,
     ]
 
-    res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
     Path(temp_clean_video).unlink(missing_ok=True)
 
     if res.returncode != 0:

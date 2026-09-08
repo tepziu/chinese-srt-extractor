@@ -219,33 +219,38 @@ def start_cleanup_worker() -> None:
 
 
 AI_TRANSLATE_MODELS = {
-    "gemini-3.7-flash-high": {
-        "name": "Gemini 3.7 Flash High ⚡ (Khuyên dùng)",
-        "description": "Nhanh, thông minh, dịch xưng hô và văn cảnh tiếng Trung chuẩn",
+    "gemini-3.8-flash-high": {
+        "name": "Gemini 3.8 Flash High ⚡ (Khuyên dùng)",
+        "description": "Thế hệ mới nhất, tốc độ 2.6s, dịch xưng hô và văn cảnh tiếng Trung xuất sắc",
         "tier": "recommended",
     },
-    "gpt-5.6-luna": {
-        "name": "GPT 5.6 Luna 🧠 (Điện ảnh / Kịch tính)",
-        "description": "Văn phong trau chuốt, giàu cảm xúc cho phim và kịch",
-        "tier": "cinema",
-    },
-    "gpt-5.5": {
-        "name": "GPT 5.5 🌟",
-        "description": "Mô hình cân bằng, ổn định",
-        "tier": "standard",
-    },
-    "claude-sonnet-4-6": {
-        "name": "Claude Sonnet 4.6 🎭",
-        "description": "Độ chính xác ngữ pháp và chuyển ngữ mượt mà",
+    "gemini-3.7-flash-high": {
+        "name": "Gemini 3.7 Flash High 🌟",
+        "description": "Rất thông minh, ổn định, bám sát bối cảnh thoại Douyin và phim",
         "tier": "high",
     },
-    "gemini-2.5-flash": {
-        "name": "Gemini 2.5 Flash 💨",
-        "description": "Siêu nhẹ, phản hồi nhanh",
+    "gemini-3.1-flash-lite": {
+        "name": "Gemini 3.1 Flash Lite 💨 (Siêu tốc 1.5s)",
+        "description": "Nhanh gấp đôi, tiết kiệm tài nguyên, dịch hàng loạt mượt mà",
         "tier": "fast",
     },
+    "claude-sonnet-5": {
+        "name": "Claude Sonnet 5 🎭 (Điện ảnh & Kịch bản)",
+        "description": "Flagship Anthropic, văn phong trau chuốt, giàu cảm xúc cho phim và kịch",
+        "tier": "cinema",
+    },
+    "grok-4.6": {
+        "name": "Grok 4.6 🚀 (Hài hước & Douyin)",
+        "description": "Văn phong hiện đại, hóm hỉnh, bắt trend mạng xã hội Douyin/TikTok",
+        "tier": "fun",
+    },
+    "gpt-5.5": {
+        "name": "GPT 5.5 🌟 (OpenAI)",
+        "description": "Mô hình cân bằng, mạch lạc, chính xác ngữ pháp",
+        "tier": "standard",
+    },
 }
-AI_DEFAULT_MODEL = os.getenv("AI_TRANSLATE_MODEL", "gemini-3.7-flash-high")
+AI_DEFAULT_MODEL = os.getenv("AI_TRANSLATE_MODEL", "gemini-3.8-flash-high")
 
 AI_TRANSLATE_CONFIG = {
     "base_url": os.getenv("AI_TRANSLATE_BASE_URL", "http://127.0.0.1:8317/v1").rstrip("/"),
@@ -372,13 +377,38 @@ def safe_stem(value: str, fallback: str = "video", max_length: int = 80) -> str:
 
 
 GEMINI_MODELS = {
-    "gemini-2.5-flash": {"name": "Gemini 2.5 Flash ⚡ (khuyên dùng)", "description": "Nhanh, giá rẻ, reasoning tốt", "tier": "stable"},
-    "gemini-2.5-flash-lite": {"name": "Gemini 2.5 Flash-Lite 💨", "description": "Siêu nhanh, rẻ nhất", "tier": "stable"},
-    "gemini-2.5-pro": {"name": "Gemini 2.5 Pro 🧠", "description": "Chính xác nhất, deep reasoning", "tier": "stable"},
-    "gemini-3-flash-preview": {"name": "Gemini 3 Flash (Preview)", "description": "Thế hệ mới", "tier": "preview"},
-    "gemini-3.1-pro-preview": {"name": "Gemini 3.1 Pro (Preview)", "description": "Mạnh nhất", "tier": "preview"},
+    "gemini-3.8-flash-high": {
+        "name": "Gemini 3.8 Flash High ⚡ (Local Gateway / Siêu tốc)",
+        "description": "Chạy qua Local Gateway 8317, không cần API Key riêng, nhận diện video cực nhanh",
+        "tier": "local_recommended",
+    },
+    "gemini-3.7-flash": {
+        "name": "Gemini 3.7 Flash 🚀 (Google Cloud - Khuyên dùng)",
+        "description": "Tốc độ 1.8s, reasoning thông minh nhất, đọc chữ mờ và lọc watermark xuất sắc",
+        "tier": "recommended",
+    },
+    "gemini-3.5-flash": {
+        "name": "Gemini 3.5 Flash 🌟 (Google Cloud - Ổn định)",
+        "description": "Tốc độ 2.4s, chuẩn xác, cân bằng tối ưu giữa tốc độ và độ bền",
+        "tier": "stable",
+    },
+    "gemini-3.5-flash-lite": {
+        "name": "Gemini 3.5 Flash-Lite 💨 (Google Cloud - Tiết kiệm)",
+        "description": "Siêu nhanh, rẻ nhất, thay thế cho 2.5-flash-lite đã bị khai tử",
+        "tier": "fast",
+    },
+    "gemini-3.1-pro-preview": {
+        "name": "Gemini 3.1 Pro 🧠 (Google Cloud - Chuyên sâu)",
+        "description": "Chuyên trị chữ Hán cổ trang, thư pháp nghệ thuật khó đọc (thay thế 2.5-pro)",
+        "tier": "pro",
+    },
+    "gemini-2.5-flash": {
+        "name": "Gemini 2.5 Flash (Google Cloud - Tương thích cũ)",
+        "description": "Phiên bản cũ duy nhất còn duy trì",
+        "tier": "legacy",
+    },
 }
-GEMINI_DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash-high")
 
 
 def get_gemini_api_key() -> str:

@@ -357,7 +357,7 @@ def upload_finish():
         else:
             gemini_api_key = get_gemini_api_key()
 
-        if not gemini_api_key:
+        if not gemini_api_key and gemini_model not in ("gemini-3.8-flash-high", "gemini-3.7-flash-high"):
             return jsonify({"error": "Chưa có Gemini API Key"}), 400
 
         translate_langs = _parse_languages(meta.get("translate_langs", "[]"))
@@ -1178,7 +1178,7 @@ def start_hardsub():
     else:
         gemini_api_key = get_gemini_api_key()
 
-    if not gemini_api_key:
+    if not gemini_api_key and gemini_model not in ("gemini-3.8-flash-high", "gemini-3.7-flash-high"):
         return jsonify({"error": "Chưa có Gemini API Key"}), 400
 
     translate_langs = _parse_languages(request.form.get("translate_langs", "[]"))
@@ -1240,7 +1240,7 @@ def start_hardsub_url():
     else:
         gemini_api_key = get_gemini_api_key()
 
-    if not gemini_api_key:
+    if not gemini_api_key and gemini_model not in ("gemini-3.8-flash-high", "gemini-3.7-flash-high"):
         return jsonify({"error": "Chưa có Gemini API Key"}), 400
 
     translate_langs = data.get("translate_langs", [])

@@ -65,8 +65,8 @@ def count_srt_segments(srt_text: str) -> int:
 
 
 
-def create_gemini_proxy_video(video_path: str, job_id: str) -> tuple[str, bool]:
-    """Tạo proxy video trực quan nhẹ để vượt giới hạn 2GB của Google Gemini API.
+def create_gemini_proxy_video(video_path: str, job_id: str, force: bool = False) -> tuple[str, bool]:
+    """Tạo proxy video trực quan nhẹ để vượt giới hạn 2GB của Google Gemini API hoặc tối ưu base64.
     
     Gemini OCR phụ đề chỉ cần đọc hình ảnh text trên màn hình (độ phân giải 720p là tối ưu),
     không cần bitrate cao hay âm thanh đa kênh. Nén proxy giúp:
@@ -76,7 +76,7 @@ def create_gemini_proxy_video(video_path: str, job_id: str) -> tuple[str, bool]:
     """
     path = Path(video_path)
     file_size = path.stat().st_size
-    if file_size <= GEMINI_MAX_DIRECT_UPLOAD_BYTES:
+    if not force and file_size <= GEMINI_MAX_DIRECT_UPLOAD_BYTES:
         return video_path, False
 
     output_dir = OUTPUT_FOLDER / job_id
@@ -111,6 +111,56 @@ def create_gemini_proxy_video(video_path: str, job_id: str) -> tuple[str, bool]:
         err = proc.stderr[-300:] if proc.stderr else ""
         print(f"⚠️ [GeminiProxy] Không thể tạo proxy ({err}), thử tiếp tục với file gốc")
         return video_path, False
+
+
+
+def extract_hardsub_via_local_gateway(video_path: str, job_id: str, model_name: str = "gemini-3.8-flash-high") -> str:
+    """Trích xuất hardsub OCR sử dụng Local Gateway 8317 qua base64 visual proxy video."""
+    import base64
+    import requests as _requests
+    from config import AI_TRANSLATE_CONFIG
+
+    # Luôn tạo proxy 720p nhẹ không âm thanh để tối ưu dung lượng base64 payload
+    upload_video_path, is_proxy = create_gemini_proxy_video(video_path, job_id, force=True)
+
+    try:
+        with open(upload_video_path, "rb") as vf:
+            vid_b64 = base64.b64encode(vf.read()).decode("utf-8")
+
+        base_url = AI_TRANSLATE_CONFIG.get("base_url", "http://127.0.0.1:8317/v1").rstrip("/")
+        api_key = AI_TRANSLATE_CONFIG.get("api_key", "").strip()
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": model_name,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": HARDSUB_PROMPT},
+                        {"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{vid_b64}"}}
+                    ]
+                }
+            ],
+            "max_tokens": 4096,
+        }
+
+        print(f"⚡ [HardsubGateway] Đang gửi visual proxy ({Path(upload_video_path).stat().st_size / 1024:.0f}KB) tới Local Gateway {base_url} (model: {model_name})...")
+        resp = _requests.post(f"{base_url}/chat/completions", headers=headers, json=payload, timeout=300)
+        if resp.status_code != 200:
+            raise RuntimeError(f"Local Gateway trả về lỗi HTTP {resp.status_code}: {resp.text[:250]}")
+
+        data = resp.json()
+        raw_text = data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+        return raw_text
+    finally:
+        if is_proxy and upload_video_path and os.path.exists(upload_video_path):
+            try:
+                os.unlink(upload_video_path)
+            except OSError:
+                pass
 
 
 def _friendly_gemini_error(error: Exception) -> str:
@@ -148,11 +198,18 @@ def hardsub_worker(job: dict) -> None:
         job["video_file"] = {"path": video_path, "filename": path.name, "size": path.stat().st_size}
 
         api_key = job.get("gemini_api_key") or get_gemini_api_key()
-        if not api_key:
-            raise RuntimeError("Chưa có Gemini API Key. Vui lòng cấu hình key.")
         model_name = job.get("gemini_model", GEMINI_DEFAULT_MODEL)
         if model_name not in GEMINI_MODELS:
             model_name = GEMINI_DEFAULT_MODEL
+
+        from config import AI_TRANSLATE_CONFIG
+        use_local_gateway = (
+            model_name in ("gemini-3.8-flash-high", "gemini-3.7-flash-high")
+            or (not api_key and bool(AI_TRANSLATE_CONFIG.get("api_key")))
+        )
+        if not api_key and not use_local_gateway:
+            raise RuntimeError("Chưa có Gemini API Key và Local Gateway chưa cấu hình.")
+
         translate_langs = [lang for lang in job.get("translate_langs", []) if lang in LANGUAGES]
         translate_method = job.get("translate_method", "google")
 
@@ -189,44 +246,53 @@ def hardsub_worker(job: dict) -> None:
         path = Path(video_path)
         job["video_file"] = {"path": video_path, "filename": path.name, "size": path.stat().st_size}
 
-        # Kiem tra kich thuoc file va tao visual proxy neu file > 1.5GB hoac qua nang
-        upload_video_path, is_proxy = create_gemini_proxy_video(video_path, job_id)
-        if is_proxy:
-            proxy_size_mb = Path(upload_video_path).stat().st_size / (1024 * 1024)
+        if use_local_gateway:
+            gateway_model = model_name if model_name in ("gemini-3.8-flash-high", "gemini-3.7-flash-high") else "gemini-3.8-flash-high"
             job.update({
-                "status": "uploading_video",
-                "progress": 5,
-                "message": f"⚡ Đang tải Visual Proxy ({proxy_size_mb:.1f}MB) lên Gemini...",
+                "status": "extracting_hardsub",
+                "progress": 30,
+                "message": f"⚡ Đang trích xuất hardsub qua Local Gateway ({gateway_model})...",
             })
+            raw_text = extract_hardsub_via_local_gateway(video_path, job_id, model_name=gateway_model)
         else:
-            job.update({
-                "status": "uploading_video",
-                "progress": 5,
-                "message": "Đang tải video lên Gemini...",
-            })
+            # Kiem tra kich thuoc file va tao visual proxy neu file > 1.5GB hoac qua nang
+            upload_video_path, is_proxy = create_gemini_proxy_video(video_path, job_id)
+            if is_proxy:
+                proxy_size_mb = Path(upload_video_path).stat().st_size / (1024 * 1024)
+                job.update({
+                    "status": "uploading_video",
+                    "progress": 5,
+                    "message": f"⚡ Đang tải Visual Proxy ({proxy_size_mb:.1f}MB) lên Gemini...",
+                })
+            else:
+                job.update({
+                    "status": "uploading_video",
+                    "progress": 5,
+                    "message": "Đang tải video lên Gemini...",
+                })
 
-        client = genai.Client(api_key=api_key)
-        video_file = client.files.upload(file=upload_video_path)
-        job.update({"progress": 15, "message": "Đã tải video lên Gemini. Đang xử lý...", "status": "processing_video"})
+            client = genai.Client(api_key=api_key)
+            video_file = client.files.upload(file=upload_video_path)
+            job.update({"progress": 15, "message": "Đã tải video lên Gemini. Đang xử lý...", "status": "processing_video"})
 
-        max_wait = 600
-        waited = 0
-        while video_file.state.name == "PROCESSING" and waited < max_wait:
-            if job.get("cancel"):
-                job["status"] = "cancelled"
-                job["message"] = "Đã hủy."
-                return
-            time.sleep(5)
-            waited += 5
-            video_file = client.files.get(name=video_file.name)
-            job["progress"] = min(40, 15 + int(waited / max_wait * 25))
-            job["message"] = f"Gemini đang xử lý video... ({waited}s)"
-        if video_file.state.name != "ACTIVE":
-            raise RuntimeError(f"Xử lý video thất bại: {video_file.state.name}")
+            max_wait = 600
+            waited = 0
+            while video_file.state.name == "PROCESSING" and waited < max_wait:
+                if job.get("cancel"):
+                    job["status"] = "cancelled"
+                    job["message"] = "Đã hủy."
+                    return
+                time.sleep(5)
+                waited += 5
+                video_file = client.files.get(name=video_file.name)
+                job["progress"] = min(40, 15 + int(waited / max_wait * 25))
+                job["message"] = f"Gemini đang xử lý video... ({waited}s)"
+            if video_file.state.name != "ACTIVE":
+                raise RuntimeError(f"Xử lý video thất bại: {video_file.state.name}")
 
-        job.update({"status": "extracting_hardsub", "progress": 45, "message": f"Đang trích xuất hardsub bằng {model_name}..."})
-        response = client.models.generate_content(model=model_name, contents=[video_file, HARDSUB_PROMPT])
-        raw_text = response.text or ""
+            job.update({"status": "extracting_hardsub", "progress": 45, "message": f"Đang trích xuất hardsub bằng {model_name}..."})
+            response = client.models.generate_content(model=model_name, contents=[video_file, HARDSUB_PROMPT])
+            raw_text = response.text or ""
         srt_content = parse_srt_from_text(raw_text)
         valid, errors = validate_srt(srt_content) if srt_content else (False, ["Không có SRT"])
         if not valid:

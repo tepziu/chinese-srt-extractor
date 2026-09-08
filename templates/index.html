@@ -503,11 +503,12 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                             </label>
                         </div>
                         <select id="aiModelSelect" style="width:100%; padding:8px; background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:12px;">
-                            <option value="gemini-3.7-flash-high" selected>Gemini 3.7 Flash High ⚡</option>
-                            <option value="gpt-5.6-luna">GPT 5.6 Luna 🧠</option>
-                            <option value="gpt-5.5">GPT 5.5 🌟</option>
-                            <option value="claude-sonnet-4-6">Claude Sonnet 4.6 🎭</option>
-                            <option value="gemini-2.5-flash">Gemini 2.5 Flash 💨</option>
+                            <option value="gemini-3.8-flash-high" selected>Gemini 3.8 Flash High ⚡ (Khuyên dùng)</option>
+                            <option value="gemini-3.7-flash-high">Gemini 3.7 Flash High 🌟</option>
+                            <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite 💨 (Siêu tốc 1.5s)</option>
+                            <option value="claude-sonnet-5">Claude Sonnet 5 🎭 (Điện ảnh & Kịch bản)</option>
+                            <option value="grok-4.6">Grok 4.6 🚀 (Hài hước & Douyin)</option>
+                            <option value="gpt-5.5">GPT 5.5 🌟 (OpenAI)</option>
                         </select>
                     </div>
 
@@ -2409,6 +2410,8 @@ function uploadWithProgress(url, formData, onProgress) {
                     if (id === data.default) opt.selected = true;
                     sel.appendChild(opt);
                 }
+                sel.onchange = updateHardsubBtnState;
+                updateHardsubBtnState();
             } catch(e) { console.error('Load Gemini models error:', e); }
         })();
 
@@ -2526,12 +2529,18 @@ function uploadWithProgress(url, formData, onProgress) {
 
         function updateHardsubBtnState() {
             const btn = document.getElementById('startHardsubBtn');
-            btn.disabled = !(hardsubFile && geminiKeyOk);
+            const sel = document.getElementById('geminiModel');
+            const modelVal = sel ? sel.value : '';
+            const isLocal = modelVal.includes('3.8') || modelVal.includes('3.7-flash-high') || (sel && sel.selectedOptions[0] && sel.selectedOptions[0].textContent.includes('Local Gateway'));
+            btn.disabled = !(hardsubFile && (geminiKeyOk || isLocal));
         }
 
         async function startHardsub() {
             if (!hardsubFile) { showError('Chưa chọn file video'); return; }
-            if (!geminiKeyOk) { showError('Chưa có Gemini API key. Hãy nhập key trước.'); return; }
+            const sel = document.getElementById('geminiModel');
+            const modelVal = sel ? sel.value : '';
+            const isLocal = modelVal.includes('3.8') || modelVal.includes('3.7-flash-high') || (sel && sel.selectedOptions[0] && sel.selectedOptions[0].textContent.includes('Local Gateway'));
+            if (!geminiKeyOk && !isLocal) { showError('Chưa có Gemini API key. Hãy nhập key hoặc chọn model Local Gateway.'); return; }
             
             const btn = document.getElementById('startHardsubBtn');
             btn.disabled = true;

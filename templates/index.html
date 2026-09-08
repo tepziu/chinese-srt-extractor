@@ -188,7 +188,10 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
 .gemini-model-row select { padding: 8px 12px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 12px; max-width: 240px; }
 .hardsub-badge { display: inline-block; padding: 3px 8px; background: rgba(139,92,246,0.15); color: #a78bfa; border-radius: 6px; font-size: 10px; font-weight: 600; }
 
-    </style>
+    #progressSection, .progress-section, #resultSection, .result-section { display: none; }
+#progressSection.show, .progress-section.show,
+#resultSection.show, .result-section.show { display: block !important; }
+</style>
 </head>
 <body>
     <div class="bg-animation"></div>
@@ -539,7 +542,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
         </div>
 
         <!-- BƯỚC 2: TIẾN TRÌNH XỬ LÝ TRỰC QUAN -->
-        <div class="card" id="progressSection" style="display:none;">
+        <div class="card progress-section" id="progressSection">
             <!-- Horizontal Stepper -->
             <div class="stepper-container">
                 <div class="step-node active" id="step_trim">
@@ -578,7 +581,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
         </div>
 
         <!-- BƯỚC 3: TRUNG TÂM XUẤT BẢN STUDIO (STUDIO EXPORT HUB) -->
-        <div class="card" id="resultSection" style="display:none;">
+        <div class="card result-section" id="resultSection">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
                 <h3 style="margin:0; font-size:18px; font-weight:800; color:#10b981; display:flex; align-items:center; gap:8px;">
                     <span>✅</span> Trích xuất &amp; Xử lý hoàn tất!
@@ -790,6 +793,23 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
         let translateMethod = 'ai';
         let ttsEngine = 'edge';
         let geminiTTSHealthLoaded = false;
+
+        function showSection(id) {
+            const el = document.getElementById(id);
+            if (el) {
+                el.classList.add('show');
+                el.style.display = 'block';
+            }
+        }
+
+        function hideSection(id) {
+            const el = document.getElementById(id);
+            if (el) {
+                el.classList.remove('show');
+                el.style.display = 'none';
+            }
+        }
+
 
         function updateBtnState() {
             const btn = document.getElementById('startBtn');
@@ -1645,8 +1665,9 @@ function uploadWithProgress(url, formData, onProgress) {
                     if (!url) return;
                     
                     document.getElementById('startBtn').textContent = '⏳ Đang gửi yêu cầu...';
-                    document.getElementById('uploadCard').style.display = 'none';
-                    document.getElementById('progressSection').classList.add('show');
+                    hideSection('uploadCard');
+                    hideSection('resultSection');
+                    showSection('progressSection');
                     document.getElementById('statusText').textContent = '⬇️ Đang phân tích và tải video từ URL...';
                     document.getElementById('statusMessage').textContent = 'Đang kết nối...';
                     document.getElementById('progressFill').style.width = '5%';
@@ -1670,8 +1691,9 @@ function uploadWithProgress(url, formData, onProgress) {
                 } else {
                     if (!selectedFile) return;
                     
-                    document.getElementById('uploadCard').style.display = 'none';
-                    document.getElementById('progressSection').classList.add('show');
+                    hideSection('uploadCard');
+                    hideSection('resultSection');
+                    showSection('progressSection');
                     document.getElementById('statusText').textContent = '⬆️ Đang tải video lên server...';
                     document.getElementById('statusMessage').textContent = 'Đang bắt đầu tải...';
                     document.getElementById('progressFill').style.width = '0%';
@@ -1706,8 +1728,9 @@ function uploadWithProgress(url, formData, onProgress) {
                 
             } catch (err) {
                 showError('Lỗi: ' + err.message);
-                document.getElementById('uploadCard').style.display = 'block';
-                document.getElementById('progressSection').classList.remove('show');
+                hideSection('progressSection');
+                hideSection('resultSection');
+                showSection('uploadCard');
                 document.getElementById('startBtn').disabled = false;
                 document.getElementById('startBtn').textContent = '🚀 Bắt đầu trích xuất phụ đề';
             }
@@ -1799,8 +1822,9 @@ function uploadWithProgress(url, formData, onProgress) {
         function showResult(data) {
             try {
                 resultData = data;
-                document.getElementById('progressSection').classList.remove('show');
-                document.getElementById('resultSection').classList.add('show');
+                hideSection('uploadCard');
+                hideSection('progressSection');
+                showSection('resultSection');
 
             if (data.trimmed_seconds && data.trimmed_seconds > 0) {
                 document.getElementById('trimmedBadgeRow').style.display = 'block';
@@ -2511,11 +2535,9 @@ function uploadWithProgress(url, formData, onProgress) {
             document.getElementById('fileInfo').classList.remove('show');
             document.getElementById('hardsubFileInfo').classList.remove('show');
             document.getElementById('hardsubFileInput').value = '';
-            document.getElementById('resultSection').classList.remove('show');
-            document.getElementById('resultSection').style.display = 'none';
-            document.getElementById('progressSection').classList.remove('show');
-            document.getElementById('progressSection').style.display = 'none';
-            document.getElementById('uploadCard').style.display = 'block';
+            hideSection('progressSection');
+            hideSection('resultSection');
+            showSection('uploadCard');
             document.getElementById('startBtn').disabled = true;
             document.getElementById('startBtn').textContent = '🚀 Bắt đầu trích xuất phụ đề';
             document.getElementById('startHardsubBtn').disabled = true;
@@ -2778,8 +2800,9 @@ function uploadWithProgress(url, formData, onProgress) {
             btn.disabled = true;
             hideError();
             
-            document.getElementById('uploadCard').style.display = 'none';
-            document.getElementById('progressSection').classList.add('show');
+            hideSection('uploadCard');
+            hideSection('resultSection');
+            showSection('progressSection');
             document.getElementById('statusText').textContent = '⬆️ Đang tải video lên server...';
             document.getElementById('statusMessage').textContent = 'Đang bắt đầu tải...';
             document.getElementById('progressFill').style.width = '0%';
@@ -2814,8 +2837,9 @@ function uploadWithProgress(url, formData, onProgress) {
                 
             } catch (err) {
                 showError('Lỗi: ' + err.message);
-                document.getElementById('uploadCard').style.display = 'block';
-                document.getElementById('progressSection').classList.remove('show');
+                hideSection('progressSection');
+                hideSection('resultSection');
+                showSection('uploadCard');
                 btn.disabled = false;
                 btn.textContent = '🔍 Bắt đầu trích hardsub (Gemini)';
             }

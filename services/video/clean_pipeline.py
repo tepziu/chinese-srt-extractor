@@ -93,8 +93,8 @@ def clean_video_pipeline(
         raise RuntimeError("Không thể khởi tạo VideoWriter")
 
     if job_id and jobs.get(job_id):
-        jobs[job_id][burn_key]["message"] = f"🧹 Đang xóa chữ AI ({engine})..."
-        jobs[job_id][burn_key]["progress"] = 25
+        jobs[job_id].setdefault(burn_key, {})["message"] = f"🧹 Đang xóa chữ AI ({engine})..."
+        jobs[job_id].setdefault(burn_key, {})["progress"] = 25
 
     print(f"🎬 Starting Clean Plate inpainting [{engine}]: {total_frames} frames, {width}x{height}, sub_box={sub_w}x{sub_h} at ({sub_x},{sub_y})")
 
@@ -112,7 +112,7 @@ def clean_video_pipeline(
                 raise RuntimeError("Đã hủy (Stop)")
 
             current_time = frame_idx / fps if fps > 0 else 0
-            has_sub = any(s <= current_time <= e for s, e in intervals)
+            has_sub = any(s <= current_time <= e for s, e in intervals) if intervals else True
 
             if has_sub:
                 crop_strip = frame[sub_y : sub_y + sub_h, sub_x : sub_x + sub_w]
@@ -146,9 +146,9 @@ def clean_video_pipeline(
 
             if frame_idx % 30 == 0 and job_id and jobs.get(job_id):
                 pct = 25 + int((frame_idx / max(1, total_frames)) * 55)
-                jobs[job_id][burn_key]["progress"] = min(pct, 80)
+                jobs[job_id].setdefault(burn_key, {})["progress"] = min(pct, 80)
                 fps_rate = frame_idx / max(0.1, time.time() - t_start)
-                jobs[job_id][burn_key]["message"] = (
+                jobs[job_id].setdefault(burn_key, {})["message"] = (
                     f"🧹 Đang xóa chữ ({engine}): {pct}% ({frame_idx}/{total_frames}f, {fps_rate:.1f} fps)"
                 )
     finally:
@@ -159,8 +159,8 @@ def clean_video_pipeline(
     print(f"✅ Inpainting loop finished: {inpainted_count}/{frame_idx} frames cleaned in {elapsed:.1f}s ({frame_idx/max(0.1, elapsed):.1f} fps)")
 
     if job_id and jobs.get(job_id):
-        jobs[job_id][burn_key]["progress"] = 85
-        jobs[job_id][burn_key]["message"] = "🎬 Đang đóng gói video & âm thanh..."
+        jobs[job_id].setdefault(burn_key, {})["progress"] = 85
+        jobs[job_id].setdefault(burn_key, {})["message"] = "🎬 Đang đóng gói video & âm thanh..."
 
     # FFmpeg final encoding with audio and optional new subtitle burn
     has_tts = tts_audio_path and os.path.exists(tts_audio_path)

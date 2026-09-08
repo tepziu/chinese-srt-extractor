@@ -281,6 +281,52 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                         
             <!-- KHỐI ĐIỀU KHIỂN VIDEO ĐƠN LẺ (FILE / URL / HARDSUB) -->
             <div id="studioSingleConfig">
+
+                <!-- CHỌN MỤC TIÊU XỬ LÝ: DỊCH TOÀN DIỆN VS CHỈ XÓA PHỤ ĐỀ -->
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px; background:rgba(0,0,0,0.3); padding:4px; border-radius:10px; border:1px solid var(--border);">
+                    <button type="button" id="btnModeTranslate" onclick="setActionMode('translate')" style="padding:10px 14px; font-size:12px; font-weight:700; border-radius:8px; border:none; cursor:pointer; background:var(--accent); color:white; transition:all 0.2s;">
+                        🌟 1. Dịch &amp; Lồng Tiếng AI (Toàn Diện)
+                    </button>
+                    <button type="button" id="btnModeCleanOnly" onclick="setActionMode('clean_only')" style="padding:10px 14px; font-size:12px; font-weight:700; border-radius:8px; border:none; cursor:pointer; background:transparent; color:var(--text-secondary); transition:all 0.2s;">
+                        🧹 2. Chỉ Xóa Phụ Đề (Giữ Âm Gốc)
+                    </button>
+                </div>
+
+                <!-- KHỐI CẤU HÌNH DÀNH RIÊNG CHO CHỈ XÓA PHỤ ĐỀ (CLEAN PLATE) -->
+                <div id="cleanOnlyDirectBox" style="display:none; background:rgba(16,185,129,0.04); border:1.5px solid rgba(16,185,129,0.3); border-radius:12px; padding:16px; margin-bottom:14px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                        <span style="font-size:13px; font-weight:700; color:#34d399;">🧹 Tùy Chọn Xóa Chữ Cũ &amp; Giữ Âm Thanh Gốc:</span>
+                        <span style="font-size:11px; padding:2px 8px; border-radius:10px; background:rgba(16,185,129,0.15); color:#34d399; font-weight:700;">⚡ Siêu Tốc (Không cần dịch)</span>
+                    </div>
+                    <div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
+                        Hệ thống sẽ bỏ qua toàn bộ khâu nhận dạng &amp; dịch thuật AI, xóa trực tiếp phụ đề tiếng Trung trên video và <b>sao chép nguyên vẹn 100% âm thanh gốc</b> của video.
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:12px; margin-bottom:12px;">
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                            <input type="checkbox" id="directCleanChkHardsub" checked style="cursor:pointer;">
+                            <span>☑️ <b>Xóa phụ đề tiếng Trung dưới chân</b></span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                            <input type="checkbox" id="directCleanChkLogo" style="cursor:pointer;">
+                            <span>🏷️ <b>Xóa logo / watermark gốc</b></span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                            <input type="checkbox" id="directCleanChkTitle" style="cursor:pointer;">
+                            <span>🏷️ <b>Xóa banner tiêu đề phía trên</b></span>
+                        </label>
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <span style="font-size:11px; color:var(--text-muted); white-space:nowrap;">Động cơ:</span>
+                            <select id="directCleanEngineSelect" style="flex:1; padding:4px 8px; background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:11px;">
+                                <option value="opencv" selected>⚡ OpenCV (Siêu nhanh 200 fps)</option>
+                                <option value="lama">🌟 LaMa AI (Sạch bóng)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="padding:8px 12px; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.25); border-radius:8px; font-size:11px; color:#34d399;">
+                        🔊 <b>Âm thanh video:</b> Tự động sao chép nguyên bản luồng audio gốc (-c:a copy), không biến đổi giọng hay nén lại.
+                    </div>
+                </div>
+
                 <!-- BẢNG CẤU HÌNH NHANH TRỌNG TÂM -->
             <div class="quick-config-grid">
                 <!-- 1. Ngôn ngữ dịch -->
@@ -1691,6 +1737,11 @@ function uploadWithProgress(url, formData, onProgress) {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             url: url,
+                            action_mode: actionMode,
+                            clean_engine: document.getElementById('directCleanEngineSelect') ? document.getElementById('directCleanEngineSelect').value : 'opencv',
+                            clean_hardsub: document.getElementById('directCleanChkHardsub') ? document.getElementById('directCleanChkHardsub').checked : true,
+                            clean_logo: document.getElementById('directCleanChkLogo') ? document.getElementById('directCleanChkLogo').checked : false,
+                            clean_title: document.getElementById('directCleanChkTitle') ? document.getElementById('directCleanChkTitle').checked : false,
                             model_size: document.getElementById('modelSize').value,
                             translate_langs: [...selectedLangs],
                             translate_method: translateMethod,
@@ -1716,6 +1767,11 @@ function uploadWithProgress(url, formData, onProgress) {
                         selectedFile,
                         'whisper',
                         {
+                            action_mode: actionMode,
+                            clean_engine: document.getElementById('directCleanEngineSelect') ? document.getElementById('directCleanEngineSelect').value : 'opencv',
+                            clean_hardsub: document.getElementById('directCleanChkHardsub') ? document.getElementById('directCleanChkHardsub').checked : true,
+                            clean_logo: document.getElementById('directCleanChkLogo') ? document.getElementById('directCleanChkLogo').checked : false,
+                            clean_title: document.getElementById('directCleanChkTitle') ? document.getElementById('directCleanChkTitle').checked : false,
                             model_size: document.getElementById('modelSize').value,
                             translate_langs: [...selectedLangs],
                             translate_method: translateMethod,
@@ -1838,6 +1894,23 @@ function uploadWithProgress(url, formData, onProgress) {
                 hideSection('uploadCard');
                 hideSection('progressSection');
                 showSection('resultSection');
+
+                if (data.mode === 'clean_only' || data.clean_video) {
+                    // Chế độ chỉ xóa chữ: Ẩn cột phụ đề, tự động hiển thị nút tải video sạch chữ
+                    const srtCard = document.querySelector('.card-srt');
+                    if (srtCard) srtCard.style.display = 'none';
+                    const cleanRes = data.clean_video || data.burn_clean || {};
+                    const cleanRow = document.getElementById('cleanPlateResultRow');
+                    const cleanDl = document.getElementById('btnDownloadCleanPlate');
+                    const cleanStat = document.getElementById('cleanPlateStatusText');
+                    if (cleanRow) cleanRow.style.display = 'flex';
+                    if (cleanDl) cleanDl.href = `/api/download-burned-video/${currentJobId}/clean`;
+                    if (cleanStat) cleanStat.textContent = `✅ Video sạch chữ đã sẵn sàng! (Âm thanh gốc 100%)`;
+                    return;
+                } else {
+                    const srtCard = document.querySelector('.card-srt');
+                    if (srtCard) srtCard.style.display = 'block';
+                }
 
             if (data.trimmed_seconds && data.trimmed_seconds > 0) {
                 document.getElementById('trimmedBadgeRow').style.display = 'block';
@@ -2569,7 +2642,47 @@ function uploadWithProgress(url, formData, onProgress) {
         let hardsubFile = null;
         let geminiKeyOk = false;
 
-                function switchInputMode(mode) {
+                
+        let actionMode = 'translate'; // 'translate' or 'clean_only'
+
+        function setActionMode(mode) {
+            actionMode = mode;
+            const btnTrans = document.getElementById('btnModeTranslate');
+            const btnClean = document.getElementById('btnModeCleanOnly');
+            const cfgGrid = document.querySelector('.quick-config-grid');
+            const cleanBox = document.getElementById('cleanOnlyDirectBox');
+            const advAccordion = document.querySelector('.accordion-header');
+            const advContent = document.getElementById('advContent');
+            const startBtn = document.getElementById('startBtn');
+
+            if (mode === 'clean_only') {
+                if (btnClean) { btnClean.style.background = '#10b981'; btnClean.style.color = '#fff'; }
+                if (btnTrans) { btnTrans.style.background = 'transparent'; btnTrans.style.color = 'var(--text-secondary)'; }
+                if (cfgGrid) cfgGrid.style.display = 'none';
+                if (cleanBox) cleanBox.style.display = 'block';
+                if (advAccordion) advAccordion.style.display = 'none';
+                if (advContent) advContent.style.display = 'none';
+                if (startBtn) {
+                    startBtn.innerHTML = '<span>🧹 BẮT ĐẦU XÓA PHỤ ĐỀ (GIỮ NGUYÊN ÂM GỐC)</span>';
+                    startBtn.style.background = 'linear-gradient(135deg, #10b981, #059669)';
+                    startBtn.style.boxShadow = '0 4px 20px rgba(16,185,129,0.35)';
+                }
+            } else {
+                if (btnTrans) { btnTrans.style.background = 'var(--accent)'; btnTrans.style.color = '#fff'; }
+                if (btnClean) { btnClean.style.background = 'transparent'; btnClean.style.color = 'var(--text-secondary)'; }
+                if (cfgGrid) cfgGrid.style.display = 'grid';
+                if (cleanBox) cleanBox.style.display = 'none';
+                if (advAccordion) advAccordion.style.display = 'flex';
+                if (startBtn) {
+                    startBtn.innerHTML = '<span>🚀 BẮT ĐẦU XỬ LÝ (START STUDIO)</span>';
+                    startBtn.style.background = 'linear-gradient(135deg, var(--accent), var(--accent-secondary))';
+                    startBtn.style.boxShadow = '0 4px 18px rgba(239,68,68,0.3)';
+                }
+            }
+        }
+
+
+        function switchInputMode(mode) {
             inputMode = mode;
             document.querySelectorAll('.input-tab').forEach((t, i) => {
                 t.classList.toggle('active', (i === 0 && mode === 'file') || (i === 1 && mode === 'url') || (i === 2 && mode === 'hardsub') || (i === 3 && mode === 'douyin'));

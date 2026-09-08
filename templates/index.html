@@ -193,12 +193,12 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
 <body>
     <div class="bg-animation"></div>
     <div class="container">
-        <div class="header">
-            <button class="btn-exit" onclick="exitApp()">⏻ Thoát ứng dụng</button>
-            <div class="header-icon">🎬</div>
-            <h1>Chinese Video Dubbing &amp; Subtitle Studio</h1>
-            <p>Trích xuất phụ đề • Dịch thuật AI • Tách nhạc nền • Lồng tiếng tự động</p>
-            <div class="device-badge cpu" id="deviceBadge">⏳ Đang kiểm tra...</div>
+        <div class="header" style="position:relative; margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid rgba(255,255,255,0.06);">
+            <button class="btn-exit" onclick="exitApp()" style="position:absolute; top:4px; right:0; padding:6px 12px; font-size:11px; font-weight:600; border-radius:8px;" title="Thoát ứng dụng">⏻ Thoát</button>
+            <div style="display:inline-flex; align-items:center; justify-content:center; width:48px; height:48px; border-radius:12px; background:linear-gradient(135deg, rgba(249,115,22,0.2), rgba(139,92,246,0.2)); border:1px solid rgba(249,115,22,0.3); font-size:24px; margin-bottom:8px; box-shadow:0 4px 16px rgba(0,0,0,0.3);">🎬</div>
+            <h1 style="font-size:20px; font-weight:800; letter-spacing:-0.3px; margin-bottom:4px;">Chinese Video Dubbing &amp; Subtitle Studio</h1>
+            <p style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">Trích xuất phụ đề • Dịch thuật AI • Tách nhạc nền • Lồng tiếng tự động</p>
+            <div class="device-badge cpu" id="deviceBadge" style="margin-top:0; font-weight:600; font-size:11px;">⏳ Đang kiểm tra...</div>
         </div>
         <div class="card" id="uploadCard">
             <div class="input-tabs">
@@ -275,7 +275,10 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                 </div>
                 <button class="remove-btn" onclick="removeFile()" title="Xóa">✕</button>
             </div>
-                        <!-- BẢNG CẤU HÌNH NHANH TRỌNG TÂM -->
+                        
+            <!-- KHỐI ĐIỀU KHIỂN VIDEO ĐƠN LẺ (FILE / URL / HARDSUB) -->
+            <div id="studioSingleConfig">
+                <!-- BẢNG CẤU HÌNH NHANH TRỌNG TÂM -->
             <div class="quick-config-grid">
                 <!-- 1. Ngôn ngữ dịch -->
                 <div class="quick-box quick-box-full">
@@ -319,8 +322,76 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                     </select>
                 </div>
             </div>
+                <!-- NÚT BẮT ĐẦU CHÍNH -->
+            <button class="btn-primary-studio" id="startBtn" onclick="startExtraction()" disabled>
+                <span>🚀 BẮT ĐẦU XỬ LÝ (START STUDIO)</span>
+            </button>
+            <button class="btn-primary-studio" id="startHardsubBtn" onclick="startHardsub()" disabled style="display:none; background:linear-gradient(135deg, #8b5cf6, #6366f1);">
+                <span>🔍 BẮT ĐẦU TRÍCH HARDSUB (GEMINI)</span>
+            </button>
 
-            
+            <!-- CÀI ĐẶT NÂNG CAO (ACCORDION THU GỌN) -->
+            <div class="accordion-header" onclick="toggleAdvanced()">
+                <div class="accordion-title">
+                    <span>⚙️</span> Tùy chỉnh nâng cao (Whisper model, AI model, Engine TTS...)
+                </div>
+                <span class="accordion-icon" id="advChevron">▼</span>
+            </div>
+            <div class="accordion-content" id="advContent">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                    <div class="quick-box">
+                        <div class="quick-box-title">🧠 Model Whisper (ASR):</div>
+                        <select id="modelSize" style="width:100%; padding:8px; background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:12px;">
+                            <option value="large-v3-turbo" selected>Large V3 Turbo ⚡ (Nhanh &amp; Chuẩn)</option>
+                            <option value="large-v3">Large V3 🧠 (Chính xác tối đa)</option>
+                            <option value="large-v2">Large V2 🛡️ (Chống lặp từ)</option>
+                            <option value="large-v1">Large V1 📦</option>
+                        </select>
+                    </div>
+
+                    <div class="quick-box">
+                        <div class="quick-box-title">🤖 Phương pháp &amp; Model dịch:</div>
+                        <div style="display:flex; gap:6px; margin-bottom:8px;">
+                            <label style="flex:1; display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
+                                <input type="radio" name="translate_method" value="ai" checked onclick="setTranslateMethod('ai')"> AI 9Router
+                            </label>
+                            <label style="flex:1; display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
+                                <input type="radio" name="translate_method" value="google" onclick="setTranslateMethod('google')"> Google
+                            </label>
+                        </div>
+                        <select id="aiModelSelect" style="width:100%; padding:8px; background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:12px;">
+                            <option value="gemini-3.8-flash-high" selected>Gemini 3.8 Flash High ⚡ (Khuyên dùng)</option>
+                            <option value="gemini-3.7-flash-high">Gemini 3.7 Flash High 🌟</option>
+                            <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite 💨 (Siêu tốc 1.5s)</option>
+                            <option value="claude-sonnet-5">Claude Sonnet 5 🎭 (Điện ảnh & Kịch bản)</option>
+                            <option value="grok-4.6">Grok 4.6 🚀 (Hài hước & Douyin)</option>
+                            <option value="gpt-5.5">GPT 5.5 🌟 (OpenAI)</option>
+                        </select>
+                    </div>
+
+                    <div class="quick-box quick-box-full">
+                        <div class="quick-box-title">🎙️ Engine tạo giọng đọc (TTS):</div>
+                        <div style="display:flex; gap:8px;">
+                            <label style="flex:1; display:flex; align-items:center; gap:8px; padding:8px 12px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; cursor:pointer;">
+                                <input type="radio" name="tts_engine" value="edge" checked onclick="setTTSEngine('edge')"> ⚡ Edge-TTS (Chuẩn, nhanh)
+                            </label>
+                            <label style="flex:1; display:flex; align-items:center; gap:8px; padding:8px 12px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; cursor:pointer;">
+                                <input type="radio" name="tts_engine" value="omnivoice" onclick="setTTSEngine('omnivoice')"> 🎤 OmniVoice (Clone giọng)
+                            </label>
+                            <label style="flex:1; display:flex; align-items:center; gap:8px; padding:8px 12px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; cursor:pointer;">
+                                <input type="radio" name="tts_engine" value="gemini" onclick="setTTSEngine('gemini')"> ✨ Gemini TTS
+                            </label>
+                        </div>
+                        <input id="geminiTTSVoice" value="Puck" type="hidden">
+                        <input id="geminiTTSEmotion" value="warm" type="hidden">
+                        <input id="geminiTTSStyle" value="" type="hidden">
+                        
+                    </div>
+                </div>
+            </div>
+            </div>
+
+            <!-- BẢNG ĐIỀU KHIỂN DOUYIN AUTOMATION ĐỘC LẬP -->
             <!-- PANEL DOUYIN AUTOMATION (GIÁM SÁT KÊNH TỰ ĐỘNG) -->
             <div class="input-panel" id="panelDouyin" style="display:none; margin-top: 14px;">
                 <!-- MONITOR STATUS & CONTROLS BANNER -->
@@ -464,75 +535,6 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                 </div>
             </div>
 
-
-            <!-- NÚT BẮT ĐẦU CHÍNH -->
-            <button class="btn-primary-studio" id="startBtn" onclick="startExtraction()" disabled>
-                <span>🚀 BẮT ĐẦU XỬ LÝ (START STUDIO)</span>
-            </button>
-            <button class="btn-primary-studio" id="startHardsubBtn" onclick="startHardsub()" disabled style="display:none; background:linear-gradient(135deg, #8b5cf6, #6366f1);">
-                <span>🔍 BẮT ĐẦU TRÍCH HARDSUB (GEMINI)</span>
-            </button>
-
-            <!-- CÀI ĐẶT NÂNG CAO (ACCORDION THU GỌN) -->
-            <div class="accordion-header" onclick="toggleAdvanced()">
-                <div class="accordion-title">
-                    <span>⚙️</span> Tùy chỉnh nâng cao (Whisper model, AI model, Engine TTS...)
-                </div>
-                <span class="accordion-icon" id="advChevron">▼</span>
-            </div>
-            <div class="accordion-content" id="advContent">
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-                    <div class="quick-box">
-                        <div class="quick-box-title">🧠 Model Whisper (ASR):</div>
-                        <select id="modelSize" style="width:100%; padding:8px; background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:12px;">
-                            <option value="large-v3-turbo" selected>Large V3 Turbo ⚡ (Nhanh &amp; Chuẩn)</option>
-                            <option value="large-v3">Large V3 🧠 (Chính xác tối đa)</option>
-                            <option value="large-v2">Large V2 🛡️ (Chống lặp từ)</option>
-                            <option value="large-v1">Large V1 📦</option>
-                        </select>
-                    </div>
-
-                    <div class="quick-box">
-                        <div class="quick-box-title">🤖 Phương pháp &amp; Model dịch:</div>
-                        <div style="display:flex; gap:6px; margin-bottom:8px;">
-                            <label style="flex:1; display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
-                                <input type="radio" name="translate_method" value="ai" checked onclick="setTranslateMethod('ai')"> AI 9Router
-                            </label>
-                            <label style="flex:1; display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
-                                <input type="radio" name="translate_method" value="google" onclick="setTranslateMethod('google')"> Google
-                            </label>
-                        </div>
-                        <select id="aiModelSelect" style="width:100%; padding:8px; background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:12px;">
-                            <option value="gemini-3.8-flash-high" selected>Gemini 3.8 Flash High ⚡ (Khuyên dùng)</option>
-                            <option value="gemini-3.7-flash-high">Gemini 3.7 Flash High 🌟</option>
-                            <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite 💨 (Siêu tốc 1.5s)</option>
-                            <option value="claude-sonnet-5">Claude Sonnet 5 🎭 (Điện ảnh & Kịch bản)</option>
-                            <option value="grok-4.6">Grok 4.6 🚀 (Hài hước & Douyin)</option>
-                            <option value="gpt-5.5">GPT 5.5 🌟 (OpenAI)</option>
-                        </select>
-                    </div>
-
-                    <div class="quick-box quick-box-full">
-                        <div class="quick-box-title">🎙️ Engine tạo giọng đọc (TTS):</div>
-                        <div style="display:flex; gap:8px;">
-                            <label style="flex:1; display:flex; align-items:center; gap:8px; padding:8px 12px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; cursor:pointer;">
-                                <input type="radio" name="tts_engine" value="edge" checked onclick="setTTSEngine('edge')"> ⚡ Edge-TTS (Chuẩn, nhanh)
-                            </label>
-                            <label style="flex:1; display:flex; align-items:center; gap:8px; padding:8px 12px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; cursor:pointer;">
-                                <input type="radio" name="tts_engine" value="omnivoice" onclick="setTTSEngine('omnivoice')"> 🎤 OmniVoice (Clone giọng)
-                            </label>
-                            <label style="flex:1; display:flex; align-items:center; gap:8px; padding:8px 12px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; cursor:pointer;">
-                                <input type="radio" name="tts_engine" value="gemini" onclick="setTTSEngine('gemini')"> ✨ Gemini TTS
-                            </label>
-                        </div>
-                        <input id="geminiTTSVoice" value="Puck" type="hidden">
-                        <input id="geminiTTSEmotion" value="warm" type="hidden">
-                        <input id="geminiTTSStyle" value="" type="hidden">
-                        <select id="geminiModel" style="display:none;"></select>
-                    </div>
-                </div>
-            </div>
-
             <div class="error-msg" id="errorMsg"></div>
         </div>
 
@@ -604,7 +606,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                 <div class="studio-card card-srt">
                     <div class="studio-card-header">
                         <div class="studio-card-title" style="color:#a78bfa;">
-                            <span>📁</span> THẺ 1: PHỤ ĐỀ SRT &amp; LỜI THOẠI
+                            <span>📁</span> 📝 PHỤ ĐỀ SRT &amp; LỜI THOẠI SONG NGỮ
                         </div>
                     </div>
                     <div class="studio-card-desc">Xem trước bản dịch song ngữ, chỉnh sửa và tải file .srt độc lập.</div>
@@ -628,7 +630,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                 <div class="studio-card card-clean">
                     <div class="studio-card-header">
                         <div class="studio-card-title" style="color:#10b981;">
-                            <span>🧹</span> THẺ 2: 1. CHỈ XỬ LÝ XÓA CHỮ &amp; LOGO (CLEAN PLATE)
+                            <span>🧹</span> 🧹 1. XUẤT VIDEO SẠCH CHỮ (CLEAN PLATE)
                         </div>
                         <span style="font-size:11px; padding:3px 8px; border-radius:12px; background:rgba(16,185,129,0.15); color:#10b981; font-weight:600;">Không in sub mới</span>
                     </div>
@@ -675,7 +677,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                 <div class="studio-card card-burn">
                     <div class="studio-card-header">
                         <div class="studio-card-title" style="color:#f97316;">
-                            <span>🎬</span> THẺ 3: 2. BURN SUB MỚI &amp; LỒNG TIẾNG (THÀNH PHẨM)
+                            <span>🎬</span> 🎬 2. XUẤT VIDEO LỒNG TIẾNG &amp; IN SUB MỚI (THÀNH PHẨM)
                         </div>
                         <span style="font-size:11px; padding:3px 8px; border-radius:12px; background:rgba(249,115,22,0.15); color:#f97316; font-weight:600;">Video hoàn chỉnh</span>
                     </div>
@@ -788,6 +790,233 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
         let translateMethod = 'ai';
         let ttsEngine = 'edge';
         let geminiTTSHealthLoaded = false;
+
+        function updateBtnState() {
+            const btn = document.getElementById('startBtn');
+            if (!btn) return;
+            if (inputMode === 'url') {
+                btn.disabled = !urlValidated;
+            } else if (inputMode === 'hardsub') {
+                updateHardsubBtnState();
+            } else {
+                btn.disabled = !selectedFile;
+            }
+        }
+
+        // --- Douyin Monitor Full Functionality ---
+        let dyChannels = [];
+        let dyStatus = {};
+
+        async function loadDouyinMonitorStatus() {
+            try {
+                const res = await fetch('/api/douyin/monitor/status');
+                const st = await res.json();
+                dyStatus = st;
+                const isRun = st.running;
+                const badge = document.getElementById('dyMonitorBadge');
+                const btn = document.getElementById('btnToggleMonitor');
+                if (badge) {
+                    badge.textContent = isRun ? `🟢 Đang chạy (${st.interval ? Math.round(st.interval/60) : 3} phút/lần)` : '⚪ Đã tạm dừng';
+                    badge.style.color = isRun ? '#34d399' : '#94a3b8';
+                }
+                if (btn) {
+                    btn.textContent = isRun ? '⏸️ Tạm Dừng' : '▶️ Tiếp Tục';
+                }
+                if (document.getElementById('dyStatActiveChannels')) {
+                    document.getElementById('dyStatActiveChannels').textContent = `${st.enabled_channels || 0}/${st.total_channels || 0}`;
+                }
+                if (document.getElementById('dyStatTotalVideos')) {
+                    document.getElementById('dyStatTotalVideos').textContent = st.downloaded_count || 0;
+                }
+                if (document.getElementById('dyStatLastScan')) {
+                    document.getElementById('dyStatLastScan').textContent = st.last_scan_time || 'Chưa có';
+                }
+                if (document.getElementById('dyStatScanStatus')) {
+                    document.getElementById('dyStatScanStatus').textContent = st.last_scan_status === 'success' ? 'Thành công' : (st.last_scan_status || 'Chờ');
+                }
+            } catch (e) {
+                console.warn('loadDouyinMonitorStatus error:', e);
+            }
+        }
+
+        async function loadDouyinChannels() {
+            const listEl = document.getElementById('dyChannelsList') || document.getElementById('dyChannelList');
+            const countEl = document.getElementById('dyChannelCount');
+            if (!listEl) return;
+            try {
+                const res = await fetch('/api/douyin/channels');
+                const data = await res.json();
+                dyChannels = data.channels || [];
+                if (countEl) countEl.textContent = dyChannels.length;
+                if (dyChannels.length === 0) {
+                    listEl.innerHTML = '<div style="text-align:center; padding:24px; color:var(--text-muted); font-size:12px;">Chưa có kênh nào được theo dõi. Nhập Douyin ID hoặc dán link ở trên để theo dõi tự động!</div>';
+                    return;
+                }
+                listEl.innerHTML = dyChannels.map(ch => {
+                    const isEn = ch.enabled !== false;
+                    const nick = escapeHtml(ch.nickname || ch.channel_id);
+                    const cid = escapeHtml(ch.channel_id);
+                    const lang = (ch.target_lang || 'vi').toUpperCase();
+                    const style = escapeHtml(ch.style || 'driving');
+                    const lastCheck = ch.last_check ? new Date(ch.last_check * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'Chưa quét';
+                    return `
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-card); padding:12px 16px; border-radius:10px; border:1px solid var(--border); margin-bottom:8px; transition:all 0.2s;">
+                        <div>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span style="font-size:14px; font-weight:700; color:var(--text-primary);">${nick}</span>
+                                <span style="font-size:11px; background:rgba(255,255,255,0.06); padding:2px 6px; border-radius:4px; color:var(--text-muted); font-family:monospace;">${cid}</span>
+                            </div>
+                            <div style="font-size:11px; color:var(--text-secondary); margin-top:4px; display:flex; align-items:center; gap:10px;">
+                                <span>🌐 Dịch: <b style="color:#60a5fa;">${lang}</b> (${style})</span>
+                                <span>🎵 BGM: <b style="color:#f97316;">${ch.bgm_mode || 'ai'}</b></span>
+                                <span>⏱️ Lần quét: ${lastCheck}</span>
+                            </div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <button type="button" onclick="toggleDouyinChannelItem('${cid}', ${!isEn})" style="padding:6px 12px; font-size:11px; font-weight:700; border-radius:6px; cursor:pointer; background:${isEn ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.05)'}; color:${isEn ? '#34d399' : '#94a3b8'}; border:1px solid ${isEn ? '#10b981' : 'var(--border)'};">
+                                ${isEn ? '🟢 Đang Bật' : '⚪ Đã Tắt'}
+                            </button>
+                            <button type="button" onclick="deleteDouyinChannelItem('${cid}')" style="padding:6px 10px; font-size:12px; border-radius:6px; background:rgba(239,68,68,0.1); color:#f87171; border:1px solid rgba(239,68,68,0.25); cursor:pointer;" title="Xóa theo dõi">
+                                🗑️
+                            </button>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                listEl.innerHTML = '<div style="color:#f87171; font-size:12px; padding:12px;">Lỗi tải danh sách kênh: ' + e.message + '</div>';
+            }
+        }
+
+        async function toggleDouyinMonitor() {
+            try {
+                const isRun = dyStatus && dyStatus.running;
+                const res = await fetch('/api/douyin/monitor/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enable: !isRun })
+                });
+                await loadDouyinMonitorStatus();
+            } catch (e) {
+                alert('Lỗi thao tác: ' + e.message);
+            }
+        }
+
+        async function scanDouyinNow() {
+            const btn = document.getElementById('btnScanNow');
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ Đang quét...'; }
+            try {
+                const res = await fetch('/api/douyin/monitor/scan', { method: 'POST' });
+                const data = await res.json();
+                if (btn) btn.textContent = '✅ Đã quét!';
+                setTimeout(async () => {
+                    if (btn) { btn.disabled = false; btn.textContent = '⚡ Quét Ngay'; }
+                    await loadDouyinMonitorStatus();
+                }, 2000);
+            } catch (e) {
+                if (btn) { btn.disabled = false; btn.textContent = '⚡ Quét Ngay'; }
+                alert('Lỗi quét: ' + e.message);
+            }
+        }
+
+        let resolvedChannelData = null;
+
+        async function resolveDouyinChannel() {
+            const input = document.getElementById('dyAddInput');
+            const val = input ? input.value.trim() : '';
+            if (!val) { alert('Vui lòng nhập Douyin ID hoặc dán link'); return; }
+            const btn = document.getElementById('btnCheckChannel');
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ Đang tìm...'; }
+            try {
+                const res = await fetch('/api/douyin/resolve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel_input: val })
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) throw new Error(data.error || 'Không tìm thấy kênh');
+                resolvedChannelData = data;
+                const card = document.getElementById('dyResolvedCard');
+                if (card) card.style.display = 'block';
+                if (document.getElementById('dyResolvedNick')) document.getElementById('dyResolvedNick').textContent = data.nickname || val;
+                if (document.getElementById('dyResolvedId')) document.getElementById('dyResolvedId').textContent = 'ID: ' + (data.meta ? data.meta.unique_id || val : val);
+                if (document.getElementById('dyResolvedFollowers')) document.getElementById('dyResolvedFollowers').textContent = 'Followers: ' + (data.meta && data.meta.follower_count ? data.meta.follower_count.toLocaleString() : 'N/A');
+                if (document.getElementById('dyResolvedAvatar') && data.meta && data.meta.avatar) {
+                    document.getElementById('dyResolvedAvatar').innerHTML = `<img src="${data.meta.avatar}" style="width:100%; height:100%; border-radius:50%; object-fit:cover;">`;
+                }
+            } catch (e) {
+                alert('Lỗi kiểm tra kênh: ' + e.message);
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = '🔍 Kiểm Tra Kênh'; }
+            }
+        }
+
+        async function addResolvedChannel() {
+            const input = document.getElementById('dyAddInput');
+            const val = input ? input.value.trim() : '';
+            if (!val) { alert('Chưa nhập thông tin kênh'); return; }
+
+            const cid = resolvedChannelData && resolvedChannelData.meta && resolvedChannelData.meta.unique_id ? resolvedChannelData.meta.unique_id : val;
+            const nick = resolvedChannelData ? resolvedChannelData.nickname : cid;
+            const secUid = resolvedChannelData ? resolvedChannelData.sec_uid : '';
+
+            const payload = {
+                channel_id: cid,
+                nickname: nick,
+                sec_uid: secUid,
+                target_lang: document.getElementById('dyAddLang') ? document.getElementById('dyAddLang').value : 'vi',
+                style: document.getElementById('dyAddStyle') ? document.getElementById('dyAddStyle').value : 'driving',
+                bgm_mode: document.getElementById('dyAddBgm') ? document.getElementById('dyAddBgm').value : 'ai',
+                auto_burn: true,
+                clean_hardsub: document.getElementById('dyAddHardsub') ? document.getElementById('dyAddHardsub').checked : true,
+                clean_logo: document.getElementById('dyAddLogo') ? document.getElementById('dyAddLogo').checked : true,
+                translate_title: document.getElementById('dyAddTitle') ? document.getElementById('dyAddTitle').checked : true,
+            };
+
+            try {
+                const res = await fetch('/api/douyin/channels', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Thêm kênh thất bại');
+                alert(`✅ Đã thêm kênh [${nick}] vào danh sách theo dõi tự động!`);
+                if (input) input.value = '';
+                const card = document.getElementById('dyResolvedCard');
+                if (card) card.style.display = 'none';
+                resolvedChannelData = null;
+                await loadDouyinChannels();
+                await loadDouyinMonitorStatus();
+            } catch (e) {
+                alert('Lỗi thêm kênh: ' + e.message);
+            }
+        }
+
+        async function toggleDouyinChannelItem(cid, enabled) {
+            try {
+                await fetch(`/api/douyin/channels/${cid}/toggle`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                await loadDouyinChannels();
+                await loadDouyinMonitorStatus();
+            } catch (e) {
+                alert('Lỗi đổi trạng thái kênh: ' + e.message);
+            }
+        }
+
+        async function deleteDouyinChannelItem(cid) {
+            if (!confirm(`Bạn có chắc chắn muốn xóa kênh ${cid} khỏi danh sách theo dõi?`)) return;
+            try {
+                await fetch(`/api/douyin/channels/${cid}`, { method: 'DELETE' });
+                await loadDouyinChannels();
+                await loadDouyinMonitorStatus();
+            } catch (e) {
+                alert('Lỗi xóa kênh: ' + e.message);
+            }
+        }
+
 
         function stopJob() {
             if (!currentJobId) return;
@@ -1731,7 +1960,7 @@ function uploadWithProgress(url, formData, onProgress) {
                     </button>
                 `;
             }
-            burnSubRow.innerHTML = burnHtml;
+            if (burnSubRow) { burnSubRow.innerHTML = burnHtml; }
 
             // Show first preview
             const burnLangSelect = document.getElementById('burnSubLangSelect');
@@ -2283,6 +2512,9 @@ function uploadWithProgress(url, formData, onProgress) {
             document.getElementById('hardsubFileInfo').classList.remove('show');
             document.getElementById('hardsubFileInput').value = '';
             document.getElementById('resultSection').classList.remove('show');
+            document.getElementById('resultSection').style.display = 'none';
+            document.getElementById('progressSection').classList.remove('show');
+            document.getElementById('progressSection').style.display = 'none';
             document.getElementById('uploadCard').style.display = 'block';
             document.getElementById('startBtn').disabled = true;
             document.getElementById('startBtn').textContent = '🚀 Bắt đầu trích xuất phụ đề';
@@ -2302,7 +2534,7 @@ function uploadWithProgress(url, formData, onProgress) {
         let hardsubFile = null;
         let geminiKeyOk = false;
 
-        function switchInputMode(mode) {
+                function switchInputMode(mode) {
             inputMode = mode;
             document.querySelectorAll('.input-tab').forEach((t, i) => {
                 t.classList.toggle('active', (i === 0 && mode === 'file') || (i === 1 && mode === 'url') || (i === 2 && mode === 'hardsub') || (i === 3 && mode === 'douyin'));
@@ -2316,28 +2548,28 @@ function uploadWithProgress(url, formData, onProgress) {
                 panelDy.classList.toggle('active', mode === 'douyin');
             }
 
-            // Toggle buttons and settings
-            const isHardsub = mode === 'hardsub';
-            const isDouyin = mode === 'douyin';
+            const singleCfg = document.getElementById('studioSingleConfig');
+            if (singleCfg) {
+                singleCfg.style.display = (mode === 'douyin') ? 'none' : 'block';
+            }
 
-            document.getElementById('startBtn').style.display = (isHardsub || isDouyin) ? 'none' : 'block';
-            document.getElementById('startHardsubBtn').style.display = isHardsub ? 'block' : 'none';
+            const isHardsub = (mode === 'hardsub');
+            const isDouyin = (mode === 'douyin');
 
-            // Hide normal settings in douyin mode
-            const allSettingRows = document.querySelectorAll('.setting-row');
-            allSettingRows.forEach(row => {
-                row.style.display = isDouyin ? 'none' : (isHardsub ? 'none' : 'flex');
-            });
+            const sBtn = document.getElementById('startBtn');
+            const hsBtn = document.getElementById('startHardsubBtn');
+            if (sBtn) sBtn.style.display = (isHardsub || isDouyin) ? 'none' : 'block';
+            if (hsBtn) hsBtn.style.display = isHardsub ? 'block' : 'none';
 
             if (mode === 'douyin') {
                 loadDouyinMonitorStatus();
                 loadDouyinChannels();
             } else if (mode === 'url') {
-                document.getElementById('startBtn').disabled = !urlValidated;
+                if (sBtn) sBtn.disabled = !urlValidated;
             } else if (mode === 'hardsub') {
                 updateHardsubBtnState();
             } else {
-                document.getElementById('startBtn').disabled = !selectedFile;
+                if (sBtn) sBtn.disabled = !selectedFile;
             }
         }
 

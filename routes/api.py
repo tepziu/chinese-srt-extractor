@@ -989,9 +989,19 @@ def trigger_burnsub(job_id, lang):
     if lang == "clean":
         burn_new_sub = False
 
+    keep_original_audio = bool(data.get("keep_original_audio", False))
+    if bgm_mode in ("keep_original", "original", "orig_only", "none_tts") or lang == "clean":
+        keep_original_audio = True
+
     thread = threading.Thread(
         target=burnsub_worker,
-        args=(job_id, lang, srt_content, sub_region, extra_regions, render_mode, inpaint_engine, trim_intro, translate_title, title_lang, brand_name, bgm_mode, bgm_volume, clean_hardsub, clean_logo, clean_title, burn_new_sub),
+        args=(
+            job_id, lang, srt_content, sub_region, extra_regions,
+            render_mode, inpaint_engine, trim_intro, translate_title,
+            title_lang, brand_name, bgm_mode, bgm_volume,
+            clean_hardsub, clean_logo, clean_title, burn_new_sub,
+            keep_original_audio
+        ),
         daemon=True,
     )
     thread.start()

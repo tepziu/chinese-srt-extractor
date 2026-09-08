@@ -418,6 +418,7 @@ def burn_sub_video(
     clean_logo: bool = False,
     clean_title: bool = False,
     burn_new_sub: bool = True,
+    keep_original_audio: bool = False,
 ):
     """Burn translated subtitle into video with tight bounding box and feathered edge blur."""
     burn_key = f"burn_{lang}"
@@ -548,9 +549,14 @@ def burn_sub_video(
     tts_key = f"tts_{lang}"
     tts_info = jobs[job_id].get(tts_key, {})
     tts_path = tts_info.get("path", "") if tts_info.get("status") == "done" else ""
-    has_tts = tts_path and os.path.exists(tts_path)
-
-    audio_to_mux = tts_path
+    
+    # Nếu người dùng chọn giữ nguyên âm thanh gốc, bỏ qua TTS hoàn toàn
+    if keep_original_audio or bgm_mode in ("keep_original", "original", "orig_only", "none_tts"):
+        has_tts = False
+        audio_to_mux = None
+    else:
+        has_tts = bool(tts_path and os.path.exists(tts_path))
+        audio_to_mux = tts_path
     if has_tts and bgm_mode != "none":
         from services.audio_mixer import mix_voiceover_with_bgm
         jobs[job_id][burn_key]["message"] = "🎵 Đang xử lý và trộn nhạc nền (BGM)..."
@@ -599,7 +605,7 @@ def burn_sub_video(
             burn_key=burn_key,
             engine=inpaint_engine,
             re_burn_ass_path=re_burn_ass,
-            tts_audio_path=audio_to_mux if has_tts else None,
+            tts_audio_path=audio_to_mux if (has_tts and render_mode != "clean") else None,
             extra_regions=extra_inpaint,
         )
 
@@ -882,6 +888,7 @@ def burnsub_worker(
     clean_logo: bool = False,
     clean_title: bool = False,
     burn_new_sub: bool = True,
+    keep_original_audio: bool = False,
 ):
     """Background worker for burn subtitle"""
     burn_key = f"burn_{lang}"
@@ -889,7 +896,8 @@ def burnsub_worker(
         burn_sub_video(
             job_id, lang, srt_content, sub_region, extra_regions,
             render_mode, inpaint_engine, trim_intro, translate_title, title_lang, brand_name,
-            bgm_mode, bgm_volume, clean_hardsub, clean_logo, clean_title, burn_new_sub
+            bgm_mode, bgm_volume, clean_hardsub, clean_logo, clean_title, burn_new_sub,
+            keep_original_audio=keep_original_audio,
         )
     except Exception as e:
         if jobs.get(job_id):

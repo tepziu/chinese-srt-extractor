@@ -733,10 +733,10 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                             <div class="quick-box-title">🎵 Lồng tiếng &amp; Nhạc nền gốc (BGM):</div>
                             <div style="display:grid; grid-template-columns:2fr 1fr; gap:10px; align-items:center;">
                                 <select id="burnBgmSelect" style="padding:8px 10px; background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:12px; font-weight:600;">
-                                    <option value="ai" selected>🌟 Giữ nhạc nền AI (Demucs - Xóa sạch tiếng Trung)</option>
-                                    <option value="duck">⚡ Giảm âm tự động (Ducking nhanh)</option>
-                                    <option value="none">🔇 Tắt âm gốc (Chỉ giữ giọng đọc mới)</option>
-                                    <option value="orig_only">🔊 Giữ âm gốc video (Không lồng tiếng)</option>
+                                    <option value="orig_only" selected>🔊 1. Giữ nguyên 100% âm thanh gốc (Không lồng tiếng TTS)</option>
+                                    <option value="ai">🌟 2. Tách nhạc AI (Demucs - Xóa sạch tiếng Trung &amp; Lồng tiếng mới)</option>
+                                    <option value="duck">⚡ 3. Giảm âm Ducking (Giữ âm gốc nhỏ dần khi có giọng đọc mới)</option>
+                                    <option value="none">🔇 4. Tắt âm gốc (Chỉ giữ giọng đọc lồng tiếng mới)</option>
                                 </select>
                                 <div style="display:flex; align-items:center; gap:6px;">
                                     <span style="font-size:11px; color:var(--text-muted); white-space:nowrap;">Âm BGM:</span>
@@ -1368,6 +1368,8 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
                         clean_logo: cleanLogo,
                         clean_title: cleanTitle,
                         burn_new_sub: false,
+                        keep_original_audio: true,
+                        bgm_mode: "keep_original",
                     })
                 });
                 const data = await resp.json();
@@ -1457,6 +1459,7 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
                         clean_logo: cleanLogo,
                         clean_title: translateTitle,
                         burn_new_sub: burnNewSub,
+                        keep_original_audio: (bgmMode === 'orig_only' || bgmMode === 'keep_original'),
                     })
                 });
                 const data = await resp.json();
@@ -1471,6 +1474,16 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
                 btn.disabled = false;
             }
         }
+
+        
+        function updateBgmSliderVisibility() {
+            const sel = document.getElementById('burnBgmSelect');
+            const row = document.getElementById('bgmVolumeRow') || document.getElementById('burnBgmVolumeRow');
+            if (!sel || !row) return;
+            const val = sel.value;
+            row.style.display = (val === 'orig_only' || val === 'none') ? 'none' : 'flex';
+        }
+
 
         function pollStudioBurnSub(lang) {
             const btn = document.getElementById('btnRunStudioBurn');

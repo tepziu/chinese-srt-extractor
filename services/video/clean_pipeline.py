@@ -78,82 +78,87 @@ def clean_video_pipeline(
     # Extract subtitle intervals from SRT
     intervals = extract_subtitle_intervals(srt_content, min_gap=0.5, pad_start=0.10, pad_end=0.15)
 
-    # Initialize inpainter engine
-    if engine == "lama":
-        inpainter = LamaInpainter()
-    else:
-        inpainter = OpenCVInpainter(method="telea")
+    from contextlib import nullcontext
+    from config import acquire_gpu_slot
 
-    temp_clean_video = str(OUTPUT_FOLDER / f"{job_id}_raw_clean.mp4")
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(temp_clean_video, fourcc, fps, (width, height))
+    gpu_ctx = acquire_gpu_slot() if engine == "lama" else nullcontext()
+    with gpu_ctx:
+        # Initialize inpainter engine
+        if engine == "lama":
+            inpainter = LamaInpainter()
+        else:
+            inpainter = OpenCVInpainter(method="telea")
 
-    if not writer.isOpened():
-        cap.release()
-        raise RuntimeError("Không thể khởi tạo VideoWriter")
+        temp_clean_video = str(OUTPUT_FOLDER / f"{job_id}_raw_clean.mp4")
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(temp_clean_video, fourcc, fps, (width, height))
 
-    if job_id and jobs.get(job_id):
-        jobs[job_id].setdefault(burn_key, {})["message"] = f"🧹 Đang xóa chữ AI ({engine})..."
-        jobs[job_id].setdefault(burn_key, {})["progress"] = 25
+        if not writer.isOpened():
+            cap.release()
+            raise RuntimeError("Không thể khởi tạo VideoWriter")
 
-    print(f"🎬 Starting Clean Plate inpainting [{engine}]: {total_frames} frames, {width}x{height}, sub_box={sub_w}x{sub_h} at ({sub_x},{sub_y})")
+        if job_id and jobs.get(job_id):
+            jobs[job_id].setdefault(burn_key, {})["message"] = f"🧹 Đang xóa chữ AI ({engine})..."
+            jobs[job_id].setdefault(burn_key, {})["progress"] = 25
 
-    frame_idx = 0
-    inpainted_count = 0
-    t_start = time.time()
+        print(f"🎬 Starting Clean Plate inpainting [{engine}]: {total_frames} frames, {width}x{height}, sub_box={sub_w}x{sub_h} at ({sub_x},{sub_y})")
 
-    try:
-        while True:
-            ret, frame = cap.read()
-            if not ret or frame is None:
-                break
+        frame_idx = 0
+        inpainted_count = 0
+        t_start = time.time()
 
-            if job_id and jobs.get(job_id, {}).get("cancel"):
-                raise RuntimeError("Đã hủy (Stop)")
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    break
 
-            current_time = frame_idx / fps if fps > 0 else 0
-            has_sub = any(s <= current_time <= e for s, e in intervals) if intervals else True
+                if job_id and jobs.get(job_id, {}).get("cancel"):
+                    raise RuntimeError("Đã hủy (Stop)")
 
-            if has_sub:
-                crop_strip = frame[sub_y : sub_y + sub_h, sub_x : sub_x + sub_w]
-                # Generate accurate text mask directly on current frame with full outline dilation
-                mask = generate_text_mask(crop_strip, dilation_radius=14)
-                if mask.max() > 0:
-                    inpainted_strip = inpainter.inpaint(crop_strip, mask)
-                    blended_strip = feather_blend(crop_strip, inpainted_strip, mask, blur_ksize=9)
-                    frame[sub_y : sub_y + sub_h, sub_x : sub_x + sub_w] = blended_strip
-                    inpainted_count += 1
+                current_time = frame_idx / fps if fps > 0 else 0
+                has_sub = any(s <= current_time <= e for s, e in intervals) if intervals else True
 
-            # Inpaint extra regions (e.g. top title card, logos)
-            if extra_regions:
-                for er in extra_regions:
-                    ey = int(height * er.get("y_ratio", 0))
-                    eh = int(height * er.get("h_ratio", 0.05))
-                    ex = int(width * er.get("x_ratio", 0))
-                    ew = int(width * er.get("w_ratio", 0.3))
-                    ey = max(0, min(ey, height - 4))
-                    eh = max(4, min(eh, height - ey))
-                    ex = max(0, min(ex, width - 4))
-                    ew = max(4, min(ew, width - ex))
-                    e_crop = frame[ey : ey + eh, ex : ex + ew]
-                    e_mask = generate_text_mask(e_crop, dilation_radius=10)
-                    if e_mask.max() > 0:
-                        e_inp = inpainter.inpaint(e_crop, e_mask)
-                        frame[ey : ey + eh, ex : ex + ew] = feather_blend(e_crop, e_inp, e_mask, blur_ksize=7)
+                if has_sub:
+                    crop_strip = frame[sub_y : sub_y + sub_h, sub_x : sub_x + sub_w]
+                    # Generate accurate text mask directly on current frame with full outline dilation
+                    mask = generate_text_mask(crop_strip, dilation_radius=14)
+                    if mask.max() > 0:
+                        inpainted_strip = inpainter.inpaint(crop_strip, mask)
+                        blended_strip = feather_blend(crop_strip, inpainted_strip, mask, blur_ksize=9)
+                        frame[sub_y : sub_y + sub_h, sub_x : sub_x + sub_w] = blended_strip
+                        inpainted_count += 1
 
-            writer.write(frame)
-            frame_idx += 1
+                # Inpaint extra regions (e.g. top title card, logos)
+                if extra_regions:
+                    for er in extra_regions:
+                        ey = int(height * er.get("y_ratio", 0))
+                        eh = int(height * er.get("h_ratio", 0.05))
+                        ex = int(width * er.get("x_ratio", 0))
+                        ew = int(width * er.get("w_ratio", 0.3))
+                        ey = max(0, min(ey, height - 4))
+                        eh = max(4, min(eh, height - ey))
+                        ex = max(0, min(ex, width - 4))
+                        ew = max(4, min(ew, width - ex))
+                        e_crop = frame[ey : ey + eh, ex : ex + ew]
+                        e_mask = generate_text_mask(e_crop, dilation_radius=10)
+                        if e_mask.max() > 0:
+                            e_inp = inpainter.inpaint(e_crop, e_mask)
+                            frame[ey : ey + eh, ex : ex + ew] = feather_blend(e_crop, e_inp, e_mask, blur_ksize=7)
 
-            if frame_idx % 30 == 0 and job_id and jobs.get(job_id):
-                pct = 25 + int((frame_idx / max(1, total_frames)) * 55)
-                jobs[job_id].setdefault(burn_key, {})["progress"] = min(pct, 80)
-                fps_rate = frame_idx / max(0.1, time.time() - t_start)
-                jobs[job_id].setdefault(burn_key, {})["message"] = (
-                    f"🧹 Đang xóa chữ ({engine}): {pct}% ({frame_idx}/{total_frames}f, {fps_rate:.1f} fps)"
-                )
-    finally:
-        cap.release()
-        writer.release()
+                writer.write(frame)
+                frame_idx += 1
+
+                if frame_idx % 30 == 0 and job_id and jobs.get(job_id):
+                    pct = 25 + int((frame_idx / max(1, total_frames)) * 55)
+                    jobs[job_id].setdefault(burn_key, {})["progress"] = min(pct, 80)
+                    fps_rate = frame_idx / max(0.1, time.time() - t_start)
+                    jobs[job_id].setdefault(burn_key, {})["message"] = (
+                        f"🧹 Đang xóa chữ ({engine}): {pct}% ({frame_idx}/{total_frames}f, {fps_rate:.1f} fps)"
+                    )
+        finally:
+            cap.release()
+            writer.release()
 
     elapsed = time.time() - t_start
     print(f"✅ Inpainting loop finished: {inpainted_count}/{frame_idx} frames cleaned in {elapsed:.1f}s ({frame_idx/max(0.1, elapsed):.1f} fps)")

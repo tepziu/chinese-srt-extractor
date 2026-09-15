@@ -23,7 +23,11 @@ CHINESE_DOMAINS = {"douyin.com", "iesdouyin.com", "xiaohongshu.com", "kuaishou.c
 def validate_download_url(url: str) -> tuple[bool, str]:
     """Validate HTTP(S) URLs and reject private-network SSRF targets."""
     try:
-        parsed = urlparse(str(url).strip())
+        clean_url = str(url).strip()
+        match = re.search(r"https?://[^\s<>\"'()]+", clean_url)
+        if match:
+            clean_url = match.group(0)
+        parsed = urlparse(clean_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             return False, "URL không hợp lệ"
         hostname = parsed.hostname.rstrip(".")

@@ -1,4 +1,4 @@
-﻿"""
+"""
 crawler.py — Interfaces with Douyin API to search channels, fetch works, and download Master videos.
 Uses the integrated spider core in services/douyin_monitor/spider/.
 """

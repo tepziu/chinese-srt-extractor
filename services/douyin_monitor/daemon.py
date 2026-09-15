@@ -1,4 +1,4 @@
-﻿"""
+"""
 daemon.py — Background Daemon for Automated Douyin Channel Monitoring.
 Periodically inspects monitored channels for new uploads and triggers the Studio pipeline.
 """

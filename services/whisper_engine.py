@@ -196,40 +196,42 @@ def process_video(job_id: str, video_path: str, model_size: str, translate_langs
 
         audio_path = extract_audio(video_path, job_id)
         job["status"] = "loading_model"
-        job["message"] = f"Đang tải AI model trên {DEVICE.upper()}..."
-        model = get_model(model_size)
+        job["message"] = f"Đang chờ lượt GPU & tải AI model [{DEVICE.upper()}]..."
+        from config import acquire_gpu_slot
+        with acquire_gpu_slot():
+            model = get_model(model_size)
 
-        job["status"] = "transcribing"
-        job["message"] = f"Đang nhận dạng giọng nói [{DEVICE.upper()}]..."
-        transcribe_started = time.time()
-        segments = []
-        with _transcription_lock:
-            segments_gen, info = model.transcribe(
-                audio_path,
-                language="zh",
-                beam_size=5,
-                vad_filter=True,
-                vad_parameters={
-                    "min_silence_duration_ms": 250,
-                    "speech_pad_ms": 100,
-                    "max_speech_duration_s": 10,
-                    "threshold": 0.35,
-                },
-                word_timestamps=True,
-                condition_on_previous_text=True,
-            )
-            duration = info.duration if info.duration else 1
-            for segment in segments_gen:
-                if job.get("cancel"):
-                    job["status"] = "cancelled"
-                    job["message"] = "Đã hủy nhận dạng"
-                    return
-                segments.append(segment)
-                progress = min(int(segment.end / duration * 100), 99)
-                elapsed = time.time() - transcribe_started
-                speed = segment.end / elapsed if elapsed > 0 else 0
-                job["progress"] = progress
-                job["message"] = f"[{DEVICE.upper()}] Nhận dạng: {progress}% ({format_timestamp(segment.end)}) - {speed:.1f}x"
+            job["status"] = "transcribing"
+            job["message"] = f"Đang nhận dạng giọng nói [{DEVICE.upper()}]..."
+            transcribe_started = time.time()
+            segments = []
+            with _transcription_lock:
+                segments_gen, info = model.transcribe(
+                    audio_path,
+                    language="zh",
+                    beam_size=5,
+                    vad_filter=True,
+                    vad_parameters={
+                        "min_silence_duration_ms": 250,
+                        "speech_pad_ms": 100,
+                        "max_speech_duration_s": 10,
+                        "threshold": 0.35,
+                    },
+                    word_timestamps=True,
+                    condition_on_previous_text=True,
+                )
+                duration = info.duration if info.duration else 1
+                for segment in segments_gen:
+                    if job.get("cancel"):
+                        job["status"] = "cancelled"
+                        job["message"] = "Đã hủy nhận dạng"
+                        return
+                    segments.append(segment)
+                    progress = min(int(segment.end / duration * 100), 99)
+                    elapsed = time.time() - transcribe_started
+                    speed = segment.end / elapsed if elapsed > 0 else 0
+                    job["progress"] = progress
+                    job["message"] = f"[{DEVICE.upper()}] Nhận dạng: {progress}% ({format_timestamp(segment.end)}) - {speed:.1f}x"
 
         transcribe_time = time.time() - transcribe_started
         split_segments = split_segments_by_sentence(segments, max_chars=30)

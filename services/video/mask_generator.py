@@ -1,4 +1,4 @@
-﻿"""
+"""
 mask_generator.py — High-precision subtitle text mask generation.
 Detects subtitle cores (yellow, white, bright text) and their exact black outline/shadow,
 without falsely detecting light-colored backgrounds (dashboards, roads, sky, shirts).

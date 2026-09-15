@@ -1,4 +1,4 @@
-﻿"""
+"""
 lama_inpaint.py — Deep Learning Inpainter using LaMa (Large Mask Inpainting) ONNX.
 Supports aspect-ratio preserving windowed inference and calibrated output range scaling.
 """

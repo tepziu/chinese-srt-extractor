@@ -29,6 +29,8 @@ from telegram.ext import (
     MessageHandler,
     ContextTypes,
     filters,
+    TypeHandler,
+    ApplicationHandlerStop,
 )
 
 # ── Import shared processing functions from modular structure ────────────────
@@ -40,6 +42,8 @@ from services.douyin_monitor import (
 )
 
 from config import (
+    TELEGRAM_ALLOWED_USER_IDS,
+    TELEGRAM_ALLOWED_CHAT_IDS,
     UPLOAD_FOLDER,
     OUTPUT_FOLDER,
     LANGUAGES,
@@ -145,6 +149,35 @@ def get_prefs(chat_id):
 
 
 # ── Command Handlers ──────────────────────────────────────────────────────
+
+
+def is_telegram_authorized(update: Update) -> bool:
+    """Check if the update comes from an authorized user or chat."""
+    if not TELEGRAM_ALLOWED_USER_IDS and not TELEGRAM_ALLOWED_CHAT_IDS:
+        return True
+    uid = update.effective_user.id if update.effective_user else None
+    cid = update.effective_chat.id if update.effective_chat else None
+    if uid and uid in TELEGRAM_ALLOWED_USER_IDS:
+        return True
+    if cid and cid in TELEGRAM_ALLOWED_CHAT_IDS:
+        return True
+    return False
+
+
+async def telegram_auth_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Global gate preventing unauthorized users from accessing GPU, Whisper, TTS, or Gemini."""
+    if not is_telegram_authorized(update):
+        uid = update.effective_user.id if update.effective_user else "unknown"
+        cid = update.effective_chat.id if update.effective_chat else "unknown"
+        print(f"⛔ [Telegram Bot] Blocked unauthorized request from user={uid}, chat={cid}")
+        if update.effective_message:
+            try:
+                await update.effective_message.reply_text(
+                    "⛔ Bạn không có quyền sử dụng bot này (Hệ thống cá nhân)."
+                )
+            except Exception:
+                pass
+        raise ApplicationHandlerStop()
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
@@ -1648,6 +1681,7 @@ def main():
     except Exception as _e:
         print(f"  [DouyinMonitor] Notice: {_e}")
     app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(TypeHandler(Update, telegram_auth_guard), group=-1)
     
     # Command handlers
     app.add_handler(CommandHandler("start", cmd_start))

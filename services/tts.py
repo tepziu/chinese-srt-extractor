@@ -53,24 +53,23 @@ def _trim_silence(audio: AudioSegment, silence_threshold: int = -40, padding_ms:
     return audio
 
 
-def _speed_audio_to_fit(source_path: str, audio: AudioSegment, max_duration_ms: int) -> AudioSegment:
-    """Trim silence and adjust speed gently to fit the subtitle slot without distortion."""
+def _speed_audio_to_fit(source_path: str, audio: AudioSegment, max_duration_ms: int, safety_margin_ms: int = 50) -> AudioSegment:
+    """Trim silence and adjust speed strictly to fit the subtitle slot without overlap or collision."""
     audio = _trim_silence(audio)
     curr_len = len(audio)
-    if max_duration_ms <= 0 or curr_len <= max_duration_ms:
+    target_slot = max(50, max_duration_ms - safety_margin_ms)
+    if curr_len <= target_slot:
         return audio
 
-    speed_ratio = curr_len / max_duration_ms
-    if speed_ratio <= 1.15:
-        return audio
-
-    clamped_ratio = min(speed_ratio, 1.8)
+    speed_ratio = curr_len / target_slot
+    clamped_ratio = min(speed_ratio, 2.0)
     filters = []
     remaining = clamped_ratio
-    while remaining > 1.0:
-        factor = min(remaining, 2.0)
-        filters.append(f"atempo={factor:.4f}")
-        remaining /= factor
+    while remaining > 2.0:
+        filters.append("atempo=2.0000")
+        remaining /= 2.0
+    if remaining > 1.0:
+        filters.append(f"atempo={remaining:.4f}")
 
     temp_trim = str(Path(source_path).with_suffix(".trim.wav"))
     audio.export(temp_trim, format="wav")
@@ -84,9 +83,14 @@ def _speed_audio_to_fit(source_path: str, audio: AudioSegment, max_duration_ms: 
     Path(temp_trim).unlink(missing_ok=True)
     if result.returncode == 0 and os.path.exists(sped_path):
         try:
-            return AudioSegment.from_wav(sped_path)
+            sped_audio = AudioSegment.from_wav(sped_path)
+            if len(sped_audio) > target_slot:
+                sped_audio = sped_audio[:target_slot]
+            return sped_audio
         finally:
             Path(sped_path).unlink(missing_ok=True)
+    if len(audio) > target_slot:
+        return audio[:target_slot]
     return audio
 
 
@@ -310,9 +314,13 @@ def generate_tts_audio(
 
         _mark_progress(job_id, tts_key, 85, "Đang ghép audio theo timeline...")
         video_duration_ms = int(float(jobs[job_id].get("duration", 0) or 0) * 1000)
-        total_duration_ms = max(video_duration_ms, segments[-1][1] + 2000)
-        final_audio = AudioSegment.silent(duration=total_duration_ms)
+        sub_end_ms = segments[-1][1] if segments else 0
+        target_total_ms = max(video_duration_ms, sub_end_ms)
+        final_audio = AudioSegment.silent(duration=target_total_ms + 2000)
         failures = []
+        last_audio_end = 0
+        safety_gap = 50
+
         for index, (start_ms, end_ms, _text) in enumerate(segments):
             source = segment_paths[index] if index < len(segment_paths) else None
             if not source or not os.path.exists(source):
@@ -320,12 +328,21 @@ def generate_tts_audio(
                 continue
             try:
                 audio = AudioSegment.from_wav(source) if source.endswith(".wav") else AudioSegment.from_mp3(source)
+                actual_start = max(start_ms, last_audio_end + safety_gap) if last_audio_end > 0 and start_ms < last_audio_end + safety_gap else start_ms
                 next_start = segments[index + 1][0] if index + 1 < len(segments) else end_ms + 2000
-                audio = _speed_audio_to_fit(source, audio, max(1, next_start - start_ms))
-                final_audio = final_audio.overlay(audio, position=start_ms)
+                max_slot = max(50, next_start - actual_start)
+                audio = _speed_audio_to_fit(source, audio, max_slot, safety_margin_ms=safety_gap)
+                if len(final_audio) < actual_start + len(audio) + 1000:
+                    final_audio = final_audio + AudioSegment.silent(duration=actual_start + len(audio) + 2000 - len(final_audio))
+                final_audio = final_audio.overlay(audio, position=actual_start)
+                last_audio_end = actual_start + len(audio)
             except Exception as exc:
                 failures.append(index)
                 print(f"TTS overlay segment {index} failed: {exc}")
+
+        # Crop master audio strictly to match video/subtitle duration
+        final_duration_ms = max(target_total_ms, last_audio_end)
+        final_audio = final_audio[:final_duration_ms]
 
         _mark_progress(job_id, tts_key, 95, "Đang export MP3...")
         output_dir = OUTPUT_FOLDER / job_id
@@ -334,7 +351,7 @@ def generate_tts_audio(
         final_audio.export(str(output_path), format="mp3", bitrate="192k")
         size = output_path.stat().st_size
         status = "partial" if failures else "done"
-        jobs[job_id][tts_key] = {
+        res_info = {
             "status": status,
             "progress": 100,
             "message": f"Hoàn thành ({size / 1048576:.1f}MB)" + (f" • thiếu {len(failures)} đoạn" if failures else ""),
@@ -345,6 +362,8 @@ def generate_tts_audio(
             "failed_segments": failures,
             "total_segments": len(segments),
         }
+        jobs[job_id][tts_key] = res_info
+        return res_info
     except Exception as exc:
         jobs[job_id][tts_key] = {"status": "error", "progress": 0, "message": f"Lỗi TTS: {exc}"}
         raise

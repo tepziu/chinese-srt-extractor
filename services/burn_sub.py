@@ -419,6 +419,7 @@ def burn_sub_video(
     clean_title: bool = False,
     burn_new_sub: bool = True,
     keep_original_audio: bool = False,
+    video_path: str = None,
 ):
     """Burn translated subtitle into video with tight bounding box and feathered edge blur."""
     burn_key = f"burn_{lang}"
@@ -429,10 +430,11 @@ def burn_sub_video(
         "message": "Đang chuẩn bị...",
     }
 
-    video_file = jobs[job_id].get("video_file")
-    video_path = video_file.get("path", "") if isinstance(video_file, dict) else ""
     if not video_path:
-        video_path = str(jobs[job_id].get("video_path", ""))
+        video_file = jobs[job_id].get("video_file")
+        video_path = video_file.get("path", "") if isinstance(video_file, dict) else ""
+        if not video_path:
+            video_path = str(jobs[job_id].get("video_path", ""))
 
     if not video_path or not os.path.exists(video_path):
         raise RuntimeError("Không tìm thấy video gốc")
@@ -548,7 +550,7 @@ def burn_sub_video(
     # Check TTS voiceover & BGM mixing
     tts_key = f"tts_{lang}"
     tts_info = jobs[job_id].get(tts_key, {})
-    tts_path = tts_info.get("path", "") if tts_info.get("status") == "done" else ""
+    tts_path = tts_info.get("path", "") if tts_info.get("status") in {"done", "partial"} else ""
     
     # Nếu người dùng chọn giữ nguyên âm thanh gốc, bỏ qua TTS hoàn toàn
     if keep_original_audio or bgm_mode in ("keep_original", "original", "orig_only", "none_tts"):
@@ -714,8 +716,12 @@ def burn_sub_video(
 
     tts_key = f"tts_{lang}"
     tts_info = jobs[job_id].get(tts_key, {})
-    tts_path = tts_info.get("path", "") if tts_info.get("status") == "done" else ""
-    has_tts = tts_path and os.path.exists(tts_path)
+    tts_path = tts_info.get("path", "") if tts_info.get("status") in {"done", "partial"} else ""
+    if keep_original_audio or bgm_mode in ("keep_original", "original", "orig_only", "none_tts"):
+        has_tts = False
+        audio_to_mux = None
+    else:
+        has_tts = bool(tts_path and os.path.exists(tts_path) and audio_to_mux)
 
     # Generate feathered alpha masks for each region
     mask_files = []
@@ -845,6 +851,7 @@ def burn_sub_video(
             "size": file_size,
             "duration": round(duration, 1),
             "method": method,
+            "sub_region": sub_region,
             "audio_replaced": has_tts,
             "blur_regions": len(all_blur_regions),
         }
@@ -868,6 +875,7 @@ def burn_sub_video(
                 Path(trimmed_video_path).unlink(missing_ok=True)
         except OSError:
             pass
+    return jobs.get(job_id, {}).get(burn_key, {})
 
 
 def burnsub_worker(

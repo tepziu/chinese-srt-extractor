@@ -103,6 +103,63 @@ WEB_PORT = int(os.getenv("WEB_PORT", "5000"))
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
+
+def parse_bool(value: Any, default: bool = False) -> bool:
+    """Parse boolean from bool, string, or int safely."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    s = str(value).strip().lower()
+    if s in {"1", "true", "yes", "on"}:
+        return True
+    if s in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _parse_id_set(raw_val: str) -> set[int]:
+    result = set()
+    for part in re.split(r"[,\s;]+", raw_val or ""):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            result.add(int(part))
+        except ValueError:
+            pass
+    return result
+
+
+_raw_chats = os.getenv("TELEGRAM_ALLOWED_CHAT_IDS", "").strip() or TELEGRAM_CHAT_ID
+TELEGRAM_ALLOWED_CHAT_IDS = _parse_id_set(_raw_chats)
+_raw_users = os.getenv("TELEGRAM_ALLOWED_USER_IDS", "").strip() or TELEGRAM_CHAT_ID
+TELEGRAM_ALLOWED_USER_IDS = _parse_id_set(_raw_users)
+
+MAX_CONCURRENT_GPU_TASKS = int(os.getenv("MAX_CONCURRENT_GPU_TASKS", "1"))
+GPU_SEMAPHORE = threading.Semaphore(max(1, MAX_CONCURRENT_GPU_TASKS))
+
+
+from contextlib import contextmanager
+
+@contextmanager
+def acquire_gpu_slot(timeout: float | None = None):
+    """Acquire a slot in GPU semaphore to prevent OOM on RTX 3050 Laptop with deadlock safeguard."""
+    wait_sec = timeout if timeout is not None else 600
+    acquired = GPU_SEMAPHORE.acquire(timeout=wait_sec)
+    if not acquired:
+        print("⚠️ [GPU Slot] Timeout waiting for GPU slot, continuing cautiously to avoid deadlock")
+    try:
+        yield
+    finally:
+        if acquired:
+            try:
+                GPU_SEMAPHORE.release()
+            except ValueError:
+                pass
+
 jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = threading.RLock()
 JOB_MAX_AGE_SECONDS = int(os.getenv("JOB_MAX_AGE_SECONDS", "3600"))
@@ -287,11 +344,15 @@ SPEAKER_VOICE_MAPS = {
             "N": {"voice": "vi-VN-NamMinhNeural", "name": "Dẫn chuyện", "gender": "neutral", "pitch": "+0Hz"},
         },
         "en": {
-            "M1": {"voice": "en-US-GuyNeural", "name": "Male Lead (Guy)", "gender": "male", "pitch": "+0Hz"},
-            "F1": {"voice": "en-US-JennyNeural", "name": "Female Lead (Jenny)", "gender": "female", "pitch": "+0Hz"},
-            "M2": {"voice": "en-US-ChristopherNeural", "name": "Male Secondary", "gender": "male", "pitch": "-4Hz"},
-            "F2": {"voice": "en-US-AriaNeural", "name": "Female Secondary", "gender": "female", "pitch": "+4Hz"},
-            "N": {"voice": "en-US-GuyNeural", "name": "Narrator", "gender": "neutral", "pitch": "+0Hz"},
+            "M1": {"voice": "en-US-AndrewMultilingualNeural", "name": "Nam chính (Andrew - Tự nhiên như người thật [Khuyên dùng])", "gender": "male", "pitch": "+0Hz"},
+            "F1": {"voice": "en-US-AvaMultilingualNeural", "name": "Nữ chính (Ava - Biểu cảm, ấm áp [Khuyên dùng])", "gender": "female", "pitch": "+0Hz"},
+            "M2": {"voice": "en-US-BrianMultilingualNeural", "name": "Nam kể chuyện (Brian - Đời thường, podcast)", "gender": "male", "pitch": "+0Hz"},
+            "F2": {"voice": "en-US-EmmaMultilingualNeural", "name": "Nữ sinh động (Emma - Tự nhiên, trẻ trung)", "gender": "female", "pitch": "+0Hz"},
+            "M3": {"voice": "en-US-ChristopherNeural", "name": "Nam trầm ấm (Christopher - Phim tài liệu, thời sự)", "gender": "male", "pitch": "-2Hz"},
+            "F3": {"voice": "en-US-AriaNeural", "name": "Nữ phát thanh viên (Aria - Chuyên nghiệp)", "gender": "female", "pitch": "+0Hz"},
+            "M4": {"voice": "en-US-GuyNeural", "name": "Nam năng động (Guy - Nhiệt huyết)", "gender": "male", "pitch": "+0Hz"},
+            "F4": {"voice": "en-US-JennyNeural", "name": "Nữ dịu dàng (Jenny - Nhẹ nhàng)", "gender": "female", "pitch": "+0Hz"},
+            "N": {"voice": "en-US-AndrewMultilingualNeural", "name": "Dẫn chuyện chuẩn Mỹ (Andrew)", "gender": "neutral", "pitch": "+0Hz"},
         },
         "id": {
             "M1": {"voice": "id-ID-ArdiNeural", "name": "Pria Utama (Ardi)", "gender": "male", "pitch": "+0Hz"},
@@ -321,7 +382,7 @@ SPEAKER_VOICE_MAPS = {
 
 TTS_VOICES = {
     "vi": "vi-VN-NamMinhNeural",
-    "en": "en-US-GuyNeural",
+    "en": "en-US-AndrewMultilingualNeural",
     "id": "id-ID-ArdiNeural",
 }
 

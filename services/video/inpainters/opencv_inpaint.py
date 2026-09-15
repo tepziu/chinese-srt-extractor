@@ -1,4 +1,4 @@
-﻿"""
+"""
 opencv_inpaint.py — High-speed inpainter with grain-matching texture synthesis.
 Preserves natural background grain (leather, asphalt, fabric, walls) without smooth smudging.
 """

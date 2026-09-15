@@ -1,4 +1,4 @@
-﻿"""
+"""
 channel_manager.py — Manages monitored Douyin channels and downloaded video history.
 """
 

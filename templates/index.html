@@ -192,257 +192,687 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
 #progressSection.show, .progress-section.show,
 #resultSection.show, .result-section.show { display: block !important; }
 </style>
-</head>
+
 <body>
     <div class="bg-animation"></div>
     <div class="container">
+        <!-- HEADER -->
         <div class="header" style="position:relative; margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid rgba(255,255,255,0.06);">
             <button class="btn-exit" onclick="exitApp()" style="position:absolute; top:4px; right:0; padding:6px 12px; font-size:11px; font-weight:600; border-radius:8px;" title="Thoát ứng dụng">⏻ Thoát</button>
             <div style="display:inline-flex; align-items:center; justify-content:center; width:48px; height:48px; border-radius:12px; background:linear-gradient(135deg, rgba(249,115,22,0.2), rgba(139,92,246,0.2)); border:1px solid rgba(249,115,22,0.3); font-size:24px; margin-bottom:8px; box-shadow:0 4px 16px rgba(0,0,0,0.3);">🎬</div>
             <h1 style="font-size:20px; font-weight:800; letter-spacing:-0.3px; margin-bottom:4px;">Chinese Video Dubbing &amp; Subtitle Studio</h1>
-            <p style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">Trích xuất phụ đề • Dịch thuật AI • Tách nhạc nền • Lồng tiếng tự động</p>
-            <div class="device-badge cpu" id="deviceBadge" style="margin-top:0; font-weight:600; font-size:11px;">⏳ Đang kiểm tra...</div>
+            <p style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">Studio Tự Động: Tải Video Douyin • Nhận Diện Hardsub • Xóa Chữ Cũ • Lồng Tiếng TTS • In Phụ Đề</p>
+            <div class="device-badge cpu" id="deviceBadge" style="margin-top:0; font-weight:600; font-size:11px;">⏳ Đang kiểm tra thiết bị...</div>
         </div>
-        <div class="card" id="uploadCard">
-            <div class="input-tabs">
-                <button class="input-tab active" onclick="switchInputMode('file')">📂 Tải file lên</button>
-                <button class="input-tab" onclick="switchInputMode('url')">🔗 Dán link</button>
-                <button class="input-tab" onclick="switchInputMode('hardsub')">🔍 Trích Hardsub</button>
-                <button class="input-tab" onclick="switchInputMode('douyin')">🛰️ Giám sát Douyin</button>
-            </div>
-            <div class="input-panel active" id="panelFile">
-                <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
-                    <div class="icon">📁</div>
-                    <h3>Kéo thả hoặc nhấn để chọn video</h3>
-                    <p>Hỗ trợ: MP4, MKV, AVI, MOV, WEBM (Không giới hạn dung lượng • Hỗ trợ mượt mà video > 2GB với Chunked Upload)</p>
-                    <input type="file" id="fileInput" accept=".mp4,.mkv,.avi,.mov,.webm,video/*">
-                </div>
-            </div>
-            <div class="input-panel" id="panelUrl">
-                <div class="url-input-group">
-                    <input type="text" class="url-input" id="urlInput" placeholder="Dán link video vào đây... (YouTube, Bilibili, Douyin, TikTok...)">
-                    <button class="btn-paste" onclick="pasteUrl()">📋 Dán</button>
-                </div>
-                <div class="url-platforms">
-                    <span class="platform-tag">YouTube</span>
-                    <span class="platform-tag">Bilibili</span>
-                    <span class="platform-tag">Douyin</span>
-                    <span class="platform-tag">TikTok</span>
-                    <span class="platform-tag">1000+ sites</span>
-                </div>
-                <div class="url-ready" id="urlReady">
-                    <span>✅</span>
-                    <span class="url-title" id="urlTitle">-</span>
-                </div>
-            </div>
-            <div class="input-panel" id="panelHardsub">
-                <div style="margin-bottom:12px;">
-                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
-                        <span style="font-size:20px;">🔑</span>
-                        <div><div style="font-size:13px; font-weight:600;">Gemini API Key</div><div style="font-size:11px; color:var(--text-muted);">Lấy key tại <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#8b5cf6;">aistudio.google.com</a></div></div>
-                    </div>
-                    <div class="gemini-key-row">
-                        <input type="password" class="gemini-key-input" id="geminiKeyInput" placeholder="AIza..." autocomplete="off">
-                        <button class="btn-save-key" id="btnSaveKey" onclick="saveGeminiKey()">💾 Lưu</button>
-                        <button style="padding:10px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;color:var(--text-muted);font-size:14px;" onclick="toggleKeyVisibility()" title="Hiện/ẩn key">👁️</button>
-                    </div>
-                    <div class="key-status" id="keyStatus">Đang kiểm tra...</div>
-                </div>
-                <div class="gemini-model-row">
-                    <div>
-                        <label>🤖 Gemini Model</label>
-                        <small>Model mạnh hơn = chính xác hơn nhưng tốn token hơn</small>
-                    </div>
-                    <select id="geminiModel"></select>
-                </div>
-                <div class="upload-zone" style="margin-top:14px;" id="hardsubUploadZone" onclick="document.getElementById('hardsubFileInput').click()">
-                    <div class="icon">🔍</div>
-                    <h3>Chọn video có phụ đề cứng (hardsub)</h3>
-                    <p>Gemini AI đọc text và tạo file .srt (Tự động tạo visual proxy siêu tốc cho video > 1.5GB / vượt 2GB)</p>
-                    <input type="file" id="hardsubFileInput" accept=".mp4,.mkv,.avi,.mov,.webm,video/*" style="display:none;">
-                </div>
-                <div class="file-info" id="hardsubFileInfo">
-                    <div class="file-icon">🎥</div>
-                    <div class="file-details">
-                        <div class="file-name" id="hardsubFileName"></div>
-                        <div class="file-size" id="hardsubFileSize"></div>
-                    </div>
-                    <button class="remove-btn" onclick="removeHardsubFile()" title="Xóa">✕</button>
-                </div>
-            </div>
-            <div class="file-info" id="fileInfo">
-                <div class="file-icon">🎥</div>
-                <div class="file-details">
-                    <div class="file-name" id="fileName"></div>
-                    <div class="file-size" id="fileSize"></div>
-                </div>
-                <button class="remove-btn" onclick="removeFile()" title="Xóa">✕</button>
-            </div>
-                        
-            <!-- KHỐI ĐIỀU KHIỂN VIDEO ĐƠN LẺ (FILE / URL / HARDSUB) -->
-            <div id="studioSingleConfig">
 
-                <!-- CHỌN MỤC TIÊU XỬ LÝ: DỊCH TOÀN DIỆN VS CHỈ XÓA PHỤ ĐỀ -->
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px; background:rgba(0,0,0,0.3); padding:4px; border-radius:10px; border:1px solid var(--border);">
-                    <button type="button" id="btnModeTranslate" onclick="setActionMode('translate')" style="padding:10px 14px; font-size:12px; font-weight:700; border-radius:8px; border:none; cursor:pointer; background:var(--accent); color:white; transition:all 0.2s;">
-                        🌟 1. Dịch &amp; Lồng Tiếng AI (Toàn Diện)
-                    </button>
-                    <button type="button" id="btnModeCleanOnly" onclick="setActionMode('clean_only')" style="padding:10px 14px; font-size:12px; font-weight:700; border-radius:8px; border:none; cursor:pointer; background:transparent; color:var(--text-secondary); transition:all 0.2s;">
-                        🧹 2. Chỉ Xóa Phụ Đề (Giữ Âm Gốc)
-                    </button>
+        <!-- 3 CHẾ ĐỘ HOẠT ĐỘNG CHÍNH -->
+        <div class="main-mode-tabs">
+            <button class="main-mode-tab active" id="tabMainPipeline" onclick="switchMainMode('pipeline')">
+                <span>🎬</span> DÂY CHUYỀN STUDIO (Pipeline 5 Bước)
+            </button>
+            <button class="main-mode-tab" id="tabMainToolbox" onclick="switchMainMode('toolbox')">
+                <span>🧰</span> HỘP CÔNG CỤ RỜI (Toolbox)
+            </button>
+            <button class="main-mode-tab" id="tabMainDouyin" onclick="switchMainMode('douyin')">
+                <span>🛰️</span> GIÁM SÁT KÊNH DOUYIN (24/7)
+            </button>
+        </div>
+
+        <!-- ================================================================= -->
+        <!-- CHẾ ĐỘ 1: DÂY CHUYỀN STUDIO (PIPELINE 5 BƯỚC)                     -->
+        <!-- ================================================================= -->
+        <div class="card" id="cardPipelineView">
+
+            <!-- 1. NGUỒN VIDEO ĐẦU VÀO -->
+            <div style="margin-bottom:16px;">
+                <div style="font-size:13px; font-weight:700; color:var(--text-primary); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+                    <span>📥</span> 1. Chọn nguồn Video đầu vào:
+                </div>
+                <div style="display:flex; gap:8px; margin-bottom:10px;">
+                    <button type="button" class="toolbox-tab-btn active" id="pipeSrcBtnUrl" onclick="setPipelineSource('url')">🔗 Dán link Douyin / Web</button>
+                    <button type="button" class="toolbox-tab-btn" id="pipeSrcBtnUpload" onclick="setPipelineSource('upload')">📁 Tải file từ máy tính</button>
                 </div>
 
-                <!-- KHỐI CẤU HÌNH DÀNH RIÊNG CHO CHỈ XÓA PHỤ ĐỀ (CLEAN PLATE) -->
-                <div id="cleanOnlyDirectBox" style="display:none; background:rgba(16,185,129,0.04); border:1.5px solid rgba(16,185,129,0.3); border-radius:12px; padding:16px; margin-bottom:14px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                        <span style="font-size:13px; font-weight:700; color:#34d399;">🧹 Tùy Chọn Xóa Chữ Cũ &amp; Giữ Âm Thanh Gốc:</span>
-                        <span style="font-size:11px; padding:2px 8px; border-radius:10px; background:rgba(16,185,129,0.15); color:#34d399; font-weight:700;">⚡ Siêu Tốc (Không cần dịch)</span>
+                <!-- Input Link URL -->
+                <div id="pipeBoxUrl">
+                    <div class="url-input-group">
+                        <input type="text" class="url-input" id="pipeUrlInput" placeholder="Dán link video Douyin vào đây (ví dụ: https://v.douyin.com/... hoặc link chia sẻ từ app)..." oninput="validatePipeUrl()">
+                        <button type="button" class="btn-paste" onclick="pastePipeUrl()">📋 Dán</button>
                     </div>
-                    <div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
-                        Hệ thống sẽ bỏ qua toàn bộ khâu nhận dạng &amp; dịch thuật AI, xóa trực tiếp phụ đề tiếng Trung trên video và <b>sao chép nguyên vẹn 100% âm thanh gốc</b> của video.
-                    </div>
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:12px; margin-bottom:12px;">
-                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                            <input type="checkbox" id="directCleanChkHardsub" checked style="cursor:pointer;">
-                            <span>☑️ <b>Xóa phụ đề tiếng Trung dưới chân</b></span>
-                        </label>
-                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                            <input type="checkbox" id="directCleanChkLogo" style="cursor:pointer;">
-                            <span>🏷️ <b>Xóa logo / watermark gốc</b></span>
-                        </label>
-                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                            <input type="checkbox" id="directCleanChkTitle" style="cursor:pointer;">
-                            <span>🏷️ <b>Xóa banner tiêu đề phía trên</b></span>
-                        </label>
-                        <div style="display:flex; align-items:center; gap:6px;">
-                            <span style="font-size:11px; color:var(--text-muted); white-space:nowrap;">Động cơ:</span>
-                            <select id="directCleanEngineSelect" style="flex:1; padding:4px 8px; background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:11px;">
-                                <option value="opencv" selected>⚡ OpenCV (Siêu nhanh 200 fps)</option>
-                                <option value="lama">🌟 LaMa AI (Sạch bóng)</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div style="padding:8px 12px; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.25); border-radius:8px; font-size:11px; color:#34d399;">
-                        🔊 <b>Âm thanh video:</b> Tự động sao chép nguyên bản luồng audio gốc (-c:a copy), không biến đổi giọng hay nén lại.
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+                        <span style="font-size:11px; color:var(--text-muted);">Hỗ trợ: Douyin Master CDN (không watermark, chất lượng gốc cao nhất), TikTok, Bilibili, YouTube...</span>
+                        <span id="pipeUrlStatus" style="font-size:11px; font-weight:600; color:#3b82f6;"></span>
                     </div>
                 </div>
 
-                <!-- BẢNG CẤU HÌNH NHANH TRỌNG TÂM -->
-            <div class="quick-config-grid">
-                <!-- 1. Ngôn ngữ dịch -->
-                <div class="quick-box quick-box-full">
-                    <div class="quick-box-title">🌍 1. Mục tiêu dịch phụ đề &amp; Lồng tiếng:</div>
-                    <div class="pill-group">
-                        <div class="pill-btn active" id="pill_lang_vi" onclick="toggleQuickLang('vi')">
-                            <span style="font-size:16px;">🇻🇳</span> Tiếng Việt <span class="chk-mark" id="chk_vi">✓</span>
-                        </div>
-                        <div class="pill-btn" id="pill_lang_en" onclick="toggleQuickLang('en')">
-                            <span style="font-size:16px;">🇺🇸</span> English <span class="chk-mark" id="chk_en" style="display:none;">✓</span>
-                        </div>
-                        <div class="pill-btn" id="pill_lang_id" onclick="toggleQuickLang('id')">
-                            <span style="font-size:16px;">🇮🇩</span> Indonesia <span class="chk-mark" id="chk_id" style="display:none;">✓</span>
-                        </div>
+                <!-- Input File Upload -->
+                <div id="pipeBoxUpload" style="display:none;">
+                    <div class="upload-zone" id="pipeUploadZone" onclick="document.getElementById('pipeFileInput').click()">
+                        <div class="icon">📁</div>
+                        <h3>Kéo thả hoặc nhấn để chọn video từ máy</h3>
+                        <p>Hỗ trợ: MP4, MKV, AVI, MOV, WEBM (Hỗ trợ Chunked Upload siêu tốc không giới hạn dung lượng)</p>
+                        <input type="file" id="pipeFileInput" accept=".mp4,.mkv,.avi,.mov,.webm,video/*" style="display:none;" onchange="onPipeFileSelected(event)">
+                    </div>
+                    <div id="pipeFileInfo" style="display:none; padding:8px 12px; background:rgba(255,255,255,0.04); border-radius:8px; margin-top:8px; font-size:12px; justify-content:space-between; align-items:center;">
+                        <span id="pipeFileNameText" style="color:#10b981; font-weight:600;"></span>
+                        <button type="button" class="btn-exit" style="position:static; padding:2px 8px; font-size:11px;" onclick="clearPipeFile()">✕ Xóa</button>
                     </div>
                 </div>
 
-                <!-- 2. Thể loại & phong cách -->
-                <div class="quick-box">
-                    <div class="quick-box-title">🎯 2. Phong cách dịch thuật:</div>
-                    <div class="pill-group">
-                        <div class="pill-btn active" id="modeBtnMovie" onclick="setTranslationMode('movie')">
-                            <span>🎬</span> Phim &amp; Kịch
-                        </div>
-                        <div class="pill-btn" id="modeBtnDriving" onclick="setTranslationMode('driving')">
-                            <span>🚗</span> Dạy lái xe
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 3. Cắt bìa đầu video -->
-                <div class="quick-box">
-                    <div class="quick-box-title">✂️ 3. Xử lý ảnh bìa video:</div>
-                    <select id="trimIntroSelect" style="width:100%; padding:10px 12px; background:rgba(0,0,0,0.25); border:1.5px solid var(--border); border-radius:8px; color:var(--text-primary); font-size:12px; outline:none; font-weight:600;">
-                        <option value="auto" selected>🔍 Tự động cắt bìa tiếng Trung (Khuyên dùng)</option>
-                        <option value="off">⏸️ Giữ nguyên (Không cắt bìa)</option>
-                        <option value="1.0">✂️ Cắt 1.0 giây đầu</option>
-                        <option value="1.5">✂️ Cắt 1.5 giây đầu</option>
-                        <option value="2.0">✂️ Cắt 2.0 giây đầu</option>
-                        <option value="3.0">✂️ Cắt 3.0 giây đầu</option>
+                <!-- Cắt bìa đầu video -->
+                <div style="margin-top:10px; display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:rgba(0,0,0,0.25); border-radius:8px; border:1px solid var(--border);">
+                    <label style="display:flex; align-items:center; gap:8px; font-size:12px; cursor:pointer;">
+                        <input type="checkbox" id="pipeTrimCoverChk" checked style="accent-color:#f97316;">
+                        <span>✂️ <b>Tự động cắt bỏ ảnh bìa tiếng Trung đầu video (1s-2s)</b></span>
+                    </label>
+                    <select id="pipeTrimSelect" style="padding:4px 8px; background:var(--bg-secondary); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:11px;">
+                        <option value="auto" selected>🔍 Tự động phát hiện AI</option>
+                        <option value="1.0">Cắt 1.0 giây</option>
+                        <option value="1.5">Cắt 1.5 giây</option>
+                        <option value="2.0">Cắt 2.0 giây</option>
+                        <option value="off">Tắt (Giữ nguyên)</option>
                     </select>
                 </div>
             </div>
-                <!-- NÚT BẮT ĐẦU CHÍNH -->
-            <button class="btn-primary-studio" id="startBtn" onclick="startExtraction()" disabled>
-                <span>🚀 BẮT ĐẦU XỬ LÝ (START STUDIO)</span>
-            </button>
-            <button class="btn-primary-studio" id="startHardsubBtn" onclick="startHardsub()" disabled style="display:none; background:linear-gradient(135deg, #8b5cf6, #6366f1);">
-                <span>🔍 BẮT ĐẦU TRÍCH HARDSUB (GEMINI)</span>
-            </button>
 
-            <!-- CÀI ĐẶT NÂNG CAO (ACCORDION THU GỌN) -->
-            <div class="accordion-header" onclick="toggleAdvanced()">
-                <div class="accordion-title">
-                    <span>⚙️</span> Tùy chỉnh nâng cao (Whisper model, AI model, Engine TTS...)
+            <!-- 2. KỊCH BẢN CHỌN NHANH (PRESETS) -->
+            <div style="margin-bottom:16px;">
+                <div style="font-size:13px; font-weight:700; color:var(--text-primary); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+                    <span>⚡</span> 2. Chọn Kịch bản nhanh (Presets):
                 </div>
-                <span class="accordion-icon" id="advChevron">▼</span>
+                <div class="preset-grid">
+                    <div class="preset-card active" id="presetFullDub" onclick="applyPipelinePreset('full_dub')">
+                        <div class="preset-title"><span>🎬</span> Trọn Gói Lồng Tiếng</div>
+                        <div class="preset-desc">Bật Bước 1+2+4+5. Dịch AI + Thuyết minh TTS khớp timeline + In sub kèm Ducking nhạc nền gốc.</div>
+                    </div>
+                    <div class="preset-card" id="presetVietsub" onclick="applyPipelinePreset('pure_vietsub')">
+                        <div class="preset-title"><span>🇻🇳</span> Chỉ Làm Vietsub</div>
+                        <div class="preset-desc">Bật Bước 1+2+5. Dịch AI + In sub đè lên sub cũ, giữ nguyên 100% âm thanh gốc.</div>
+                    </div>
+                    <div class="preset-card" id="presetEditor" onclick="applyPipelinePreset('editor_kit')">
+                        <div class="preset-title"><span>🧹</span> Bộ Dựng Tự Do</div>
+                        <div class="preset-desc">Bật Bước 1+2+3. Xuất 1 video sạch bóng chữ (Clean Plate) và 1 file .SRT để tự dựng CapCut.</div>
+                    </div>
+                    <div class="preset-card" id="presetCustom" onclick="applyPipelinePreset('custom')">
+                        <div class="preset-title"><span>⚙️</span> Tùy Biến Tự Do</div>
+                        <div class="preset-desc">Tự do bật/tắt từng công đoạn bên dưới theo đúng nhu cầu riêng của bạn.</div>
+                    </div>
+                </div>
             </div>
-            <div class="accordion-content" id="advContent">
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-                    <div class="quick-box">
-                        <div class="quick-box-title">🧠 Model Whisper (ASR):</div>
-                        <select id="modelSize" style="width:100%; padding:8px; background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:12px;">
-                            <option value="large-v3-turbo" selected>Large V3 Turbo ⚡ (Nhanh &amp; Chuẩn)</option>
-                            <option value="large-v3">Large V3 🧠 (Chính xác tối đa)</option>
-                            <option value="large-v2">Large V2 🛡️ (Chống lặp từ)</option>
-                            <option value="large-v1">Large V1 📦</option>
-                        </select>
-                    </div>
 
-                    <div class="quick-box">
-                        <div class="quick-box-title">🤖 Phương pháp &amp; Model dịch:</div>
-                        <div style="display:flex; gap:6px; margin-bottom:8px;">
-                            <label style="flex:1; display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
-                                <input type="radio" name="translate_method" value="ai" checked onclick="setTranslateMethod('ai')"> AI 9Router
-                            </label>
-                            <label style="flex:1; display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
-                                <input type="radio" name="translate_method" value="google" onclick="setTranslateMethod('google')"> Google
-                            </label>
+            <!-- 3. CHECKLIST 5 CÔNG ĐOẠN (WORKFLOW STEPS) -->
+            <div style="margin-bottom:16px;">
+                <div style="font-size:13px; font-weight:700; color:var(--text-primary); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+                    <span>📋</span> 3. Danh sách các công đoạn thực hiện:
+                </div>
+                <div class="step-checklist">
+
+                    <!-- BƯỚC 1: TẢI VIDEO GỐC -->
+                    <div class="step-item enabled" id="stepItem1">
+                        <div class="step-header">
+                            <div class="step-header-left">
+                                <input type="checkbox" class="step-checkbox" id="chkStep1" checked onchange="updateStepState(1)">
+                                <div>
+                                    <div class="step-title">Bước 1: Tải video gốc Douyin (Master CDN)</div>
+                                    <div class="step-desc">Tải trực tiếp bản Master không nén, 100% sạch watermark từ CDN Douyin</div>
+                                </div>
+                            </div>
+                            <span class="step-badge" style="background:rgba(59,130,246,0.15); color:#60a5fa;">Đầu vào video</span>
                         </div>
-                        <select id="aiModelSelect" style="width:100%; padding:8px; background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:12px;">
-                            <option value="gemini-3.8-flash-high" selected>Gemini 3.8 Flash High ⚡ (Khuyên dùng)</option>
-                            <option value="gemini-3.7-flash-high">Gemini 3.7 Flash High 🌟</option>
-                            <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite 💨 (Siêu tốc 1.5s)</option>
-                            <option value="claude-sonnet-5">Claude Sonnet 5 🎭 (Điện ảnh & Kịch bản)</option>
-                            <option value="grok-4.6">Grok 4.6 🚀 (Hài hước & Douyin)</option>
-                            <option value="gpt-5.5">GPT 5.5 🌟 (OpenAI)</option>
-                        </select>
                     </div>
 
-                    <div class="quick-box quick-box-full">
-                        <div class="quick-box-title">🎙️ Engine tạo giọng đọc (TTS):</div>
+                    <!-- BƯỚC 2: NHẬN DIỆN & DỊCH PHỤ ĐỀ -->
+                    <div class="step-item enabled" id="stepItem2">
+                        <div class="step-header" onclick="toggleStepBody(2)">
+                            <div class="step-header-left">
+                                <input type="checkbox" class="step-checkbox" id="chkStep2" checked onclick="event.stopPropagation()" onchange="updateStepState(2)">
+                                <div>
+                                    <div class="step-title">Bước 2: Nhận diện phụ đề &amp; Dịch thuật AI</div>
+                                    <div class="step-desc">Trích xuất chữ Hán (Gemini 3.8 / Whisper ASR) và dịch sang Tiếng Việt/Tiếng Anh</div>
+                                </div>
+                            </div>
+                            <span class="accordion-icon" id="stepIcon2">▼</span>
+                        </div>
+                        <div class="step-body" id="stepBody2">
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                                <div class="quick-box" style="margin:0; padding:10px;">
+                                    <label style="font-size:11px; font-weight:600; display:block; margin-bottom:4px;">🤖 Động cơ nhận diện chữ Hán:</label>
+                                    <select id="pipeSubEngine" style="width:100%; padding:6px 8px; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:11px;">
+                                        <option value="gemini" selected>🌟 Gemini 3.8 Flash High (Đọc chữ trên hình - Khuyên dùng)</option>
+                                        <option value="whisper">🎙️ Faster-Whisper Large V3 (Nghe giọng nói từ âm thanh)</option>
+                                    </select>
+                                </div>
+                                <div class="quick-box" style="margin:0; padding:10px;">
+                                    <label style="font-size:11px; font-weight:600; display:block; margin-bottom:4px;">🌐 Ngôn ngữ đích:</label>
+                                    <select id="pipeTargetLang" onchange="updatePipelineVoiceList()" style="width:100%; padding:6px 8px; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:11px;">
+                                        <option value="vi" selected>🇻🇳 Tiếng Việt (Vietnamese)</option>
+                                        <option value="en">🇬🇧 Tiếng Anh (English)</option>
+                                        <option value="id">🇮🇩 Tiếng Indonesia</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                                <div class="quick-box" style="margin:0; padding:10px;">
+                                    <label style="font-size:11px; font-weight:600; display:block; margin-bottom:4px;">🎯 Phong cách dịch thuật:</label>
+                                    <select id="pipeStyleSelect" style="width:100%; padding:6px 8px; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:11px;">
+                                        <option value="movie" selected>🎬 Điện ảnh &amp; Kịch bản (Tự nhiên, truyền cảm)</option>
+                                        <option value="driving">🚗 Dạy lái xe &amp; Mẹo xe (Chuẩn thuật ngữ xe hơi)</option>
+                                        <option value="literal">📖 Dịch sát nghĩa từng câu</option>
+                                        <option value="fun">🚀 Hài hước Douyin</option>
+                                    </select>
+                                </div>
+                                <div class="quick-box" style="margin:0; padding:10px; display:flex; flex-direction:column; justify-content:center;">
+                                    <label style="display:flex; align-items:center; gap:8px; font-size:11px; font-weight:700; color:#fbbf24; cursor:pointer;">
+                                        <input type="checkbox" id="pipePauseReviewChk" checked style="accent-color:#f59e0b;">
+                                        <span>⏸️ Tạm dừng để tôi xem &amp; sửa phụ đề trước khi In/TTS</span>
+                                    </label>
+                                    <span style="font-size:10px; color:var(--text-muted); margin-top:4px;">(Khuyên dùng: Cho phép duyệt lại nội dung dịch, chống sai sót trước khi tốn thời gian render video)</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- BƯỚC 3: XỬ LÝ PHỤ ĐỀ GỐC (CLEAN PLATE) -->
+                    <div class="step-item" id="stepItem3">
+                        <div class="step-header" onclick="toggleStepBody(3)">
+                            <div class="step-header-left">
+                                <input type="checkbox" class="step-checkbox" id="chkStep3" onclick="event.stopPropagation()" onchange="updateStepState(3)">
+                                <div>
+                                    <div class="step-title">Bước 3: Xử lý phụ đề gốc trên video (Xóa sạch / Che mờ chữ cũ)</div>
+                                    <div class="step-desc">Tẩy sạch chữ Hán, watermark Douyin để tạo video sạch (Clean Plate) trước khi in sub mới</div>
+                                </div>
+                            </div>
+                            <span class="accordion-icon" id="stepIcon3">▼</span>
+                        </div>
+                        <div class="step-body" id="stepBody3" style="display:none;">
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                                <div class="quick-box" style="margin:0; padding:10px;">
+                                    <label style="font-size:11px; font-weight:600; display:block; margin-bottom:4px;">🎨 Động cơ xóa chữ cũ:</label>
+                                    <select id="pipeCleanEngine" style="width:100%; padding:6px 8px; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:11px;">
+                                        <option value="opencv" selected>⚡ OpenCV Inpaint (Siêu nhanh 200 fps)</option>
+                                        <option value="lama">🌟 LaMa AI Inpaint (Sạch bóng chất lượng cao)</option>
+                                    </select>
+                                </div>
+                                <div class="quick-box" style="margin:0; padding:10px;">
+                                    <label style="font-size:11px; font-weight:600; display:block; margin-bottom:4px;">📍 Vị trí nhận diện chữ cũ:</label>
+                                    <select id="pipeCleanRegionMode" style="width:100%; padding:6px 8px; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:11px;">
+                                        <option value="auto" selected>🤖 Tự động nhận diện (AI OCR Auto-Detect)</option>
+                                        <option value="manual">📐 Chọn vị trí thủ công / Preset Douyin</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div style="display:flex; gap:12px; font-size:12px; padding:6px 10px; background:rgba(0,0,0,0.2); border-radius:6px;">
+                                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                                    <input type="checkbox" id="pipeCleanChkSub" checked> Xóa hardsub chân video
+                                </label>
+                                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                                    <input type="checkbox" id="pipeCleanChkLogo"> Xóa logo/watermark kênh
+                                </label>
+                                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                                    <input type="checkbox" id="pipeCleanChkTitle"> Xóa banner tiêu đề trên
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="step-item enabled" id="stepItem4">
+                        <div class="step-header" onclick="toggleStepBody(4)">
+                            <div class="step-header-left">
+                                <input type="checkbox" class="step-checkbox" id="chkStep4" checked onclick="event.stopPropagation()" onchange="updateStepState(4)">
+                                <div>
+                                    <div class="step-title">Bước 4: Tạo thuyết minh giọng đọc (SRT to TTS)</div>
+                                    <div class="step-desc">Tạo file âm thanh MP3 khớp 100% thời lượng phụ đề, 0% chồng chéo (Smart Sync)</div>
+                                </div>
+                            </div>
+                            <span class="accordion-icon" id="stepIcon4">▼</span>
+                        </div>
+                        <div class="step-body" id="stepBody4">
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                                <div class="quick-box" style="margin:0; padding:10px;">
+                                    <label style="font-size:11px; font-weight:600; display:block; margin-bottom:4px;">🎙️ Giọng đọc thuyết minh:</label>
+                                    <select id="pipeVoiceSelect" style="width:100%; padding:6px 8px; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:11px;">
+                                        <option value="vi-VN-NamMinhNeural" selected>Nam Minh (Truyền cảm, giọng chuẩn)</option>
+                                        <option value="vi-VN-HoaiMyNeural">Hoài My (Nữ trầm ấm, kể chuyện)</option>
+                                    </select>
+                                </div>
+                                <div class="quick-box" style="margin:0; padding:10px;">
+                                    <label style="font-size:11px; font-weight:600; display:block; margin-bottom:4px;">🎚️ Căn chỉnh timeline:</label>
+                                    <select id="pipeAlignModeSelect" style="width:100%; padding:6px 8px; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:11px;">
+                                        <option value="smart_sync" selected>⭐ Smart Sync (Chống chồng chéo, tự co giãn tốc)</option>
+                                        <option value="strict_sub">⏱️ Khớp nghiêm ngặt thời lượng dòng</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- BƯỚC 5: IN HARDSUB ĐÃ DỊCH -->
+                    <div class="step-item enabled" id="stepItem5">
+                        <div class="step-header" onclick="toggleStepBody(5)">
+                            <div class="step-header-left">
+                                <input type="checkbox" class="step-checkbox" id="chkStep5" checked onclick="event.stopPropagation()" onchange="updateStepState(5)">
+                                <div>
+                                    <div class="step-title">Bước 5: In phụ đề mới đã dịch &amp; Xuất video thành phẩm</div>
+                                    <div class="step-desc">In phụ đề dịch mới sắc nét lên video và hoàn thiện âm thanh (Video thành phẩm cuối cùng)</div>
+                                </div>
+                            </div>
+                            <span class="accordion-icon" id="stepIcon5">▼</span>
+                        </div>
+                        <div class="step-body" id="stepBody5">
+                            <!-- THANH THÔNG BÁO LIÊN KẾT BƯỚC 3 -->
+                            <div id="step5SourceNotice" style="margin-bottom:12px; padding:8px 12px; border-radius:8px; font-size:11px; border:1px solid rgba(16,185,129,0.35); background:rgba(16,185,129,0.12); color:#34d399; line-height:1.4;">
+                                🟢 <b>Đã liên kết Bước 3:</b> Sẽ in phụ đề mới thẳng lên <b>Video đã xóa sạch chữ</b> (Chất lượng hoàn hảo, 100% không bị đè chữ cũ).
+                            </div>
+
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                                <div class="quick-box" style="margin:0; padding:10px;">
+                                    <label style="font-size:11px; font-weight:600; display:block; margin-bottom:4px;">🔊 Xử lý âm thanh video thành phẩm:</label>
+                                    <select id="pipeAudioModeSelect" style="width:100%; padding:6px 8px; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:11px;">
+                                        <option value="tts_ducking" selected>🎚️ Lồng tiếng TTS + Ducking nhạc nền gốc (Hạ nhỏ khi có thoại)</option>
+                                        <option value="keep_original">🔊 Giữ nguyên 100% âm thanh gốc (Dành cho Vietsub)</option>
+                                        <option value="tts_clean_bgm">🎶 Tách nhạc nền BGM riêng (Demucs v4) + Lồng tiếng</option>
+                                    </select>
+                                </div>
+                                <div class="quick-box" style="margin:0; padding:10px;">
+                                    <label style="font-size:11px; font-weight:600; display:block; margin-bottom:4px;">✨ Định dạng phụ đề in mới:</label>
+                                    <select id="pipeSubtitleStyleSelect" style="width:100%; padding:6px 8px; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:11px;">
+                                        <option value="standard" selected>🌟 Chuẩn nét Douyin (Chữ trắng viền đen đậm, chân video)</option>
+                                        <option value="yellow">⭐ Nổi bật (Chữ vàng viền đen đậm)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <button class="btn-primary-studio" id="btnRunPipeline" onclick="runStudioPipeline()">
+                <span>🚀 BẮT ĐẦU CHẠY QUY TRÌNH STUDIO (START PIPELINE)</span>
+            </button>
+
+<!-- ================================================================= -->
+        <!-- THANH TIẾN TRÌNH CHUNG & STEPPER                                  -->
+        <!-- ================================================================= -->
+        <div class="card progress-section" id="progressSection">
+            <!-- 5-Step Stepper -->
+            <div class="stepper-row" id="stepperRow">
+                <div class="stepper-step" id="stepNode1">
+                    <div class="stepper-node">1</div>
+                    <div class="stepper-label">Tải Video</div>
+                </div>
+                <div class="stepper-step" id="stepNode2">
+                    <div class="stepper-node">2</div>
+                    <div class="stepper-label">Dịch Sub</div>
+                </div>
+                <div class="stepper-step" id="stepNode3">
+                    <div class="stepper-node">3</div>
+                    <div class="stepper-label">Xóa Chữ</div>
+                </div>
+                <div class="stepper-step" id="stepNode4">
+                    <div class="stepper-node">4</div>
+                    <div class="stepper-label">Lồng Tiếng</div>
+                </div>
+                <div class="stepper-step" id="stepNode5">
+                    <div class="stepper-node">5</div>
+                    <div class="stepper-label">In Sub Mới</div>
+                </div>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <span style="font-size:13px; font-weight:700; color:var(--text-primary);" id="progressText">Đang khởi tạo...</span>
+                <span style="font-size:14px; font-weight:800; color:#f97316;" id="progressPercent">0%</span>
+            </div>
+            <div class="progress-bar" style="background:rgba(255,255,255,0.06); height:10px; border-radius:5px; overflow:hidden;">
+                <div id="progressFill" style="height:100%; width:0%; background:linear-gradient(90deg, #f97316, #8b5cf6); transition:width 0.3s;"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+                <span style="font-size:11px; color:var(--text-muted);" id="progressDetail">Vui lòng đợi trong giây lát...</span>
+                <button type="button" class="btn-exit" style="position:static; padding:3px 10px; font-size:11px;" onclick="cancelCurrentJob()">🛑 Dừng xử lý</button>
+            </div>
+
+            <!-- KHUNG TẠM DỪNG ĐỂ DUYỆT / SỬA PHỤ ĐỀ (HUMAN-IN-THE-LOOP) -->
+            <div id="reviewBox" style="display:none; background:rgba(245,158,11,0.08); border:1.5px solid #f59e0b; border-radius:12px; padding:16px; margin-top:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <span style="font-size:13px; font-weight:700; color:#fbbf24;">🔍 ĐIỂM KIỂM DUYỆT PHỤ ĐỀ (BƯỚC 2 HOÀN TẤT)</span>
+                    <span style="font-size:11px; background:rgba(245,158,11,0.2); color:#fbbf24; padding:2px 8px; border-radius:6px; font-weight:600;">Tạm dừng kiểm tra</span>
+                </div>
+                <p style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">
+                    Hệ thống đã nhận diện và dịch xong file phụ đề. Bạn có thể kiểm tra hoặc sửa trực tiếp các câu thoại bên dưới trước khi hệ thống tạo giọng đọc và in sub lên video.
+                </p>
+                <textarea id="reviewSrtTextarea" rows="7" style="width:100%; padding:10px; background:var(--bg-card); border:1px solid var(--border); border-radius:8px; color:var(--text-primary); font-family:monospace; font-size:12px; resize:vertical; margin-bottom:12px;"></textarea>
+                <div style="display:flex; gap:10px; justify-content:flex-end;">
+                    <button type="button" class="btn-primary-studio" style="margin:0; padding:8px 18px; font-size:12px; background:linear-gradient(135deg, #10b981, #059669);" onclick="confirmAndContinuePipeline()">
+                        ✅ Xác Nhận Phụ Đề &amp; Tiếp Tục Chạy
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================================================================= -->
+        <!-- KẾT QUẢ HOÀN TẤT & DOWNLOAD HUB                                   -->
+        <!-- ================================================================= -->
+        <div class="card result-section" id="resultSection">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                <h3 style="margin:0; font-size:18px; font-weight:800; color:#10b981; display:flex; align-items:center; gap:8px;">
+                    <span>🎉</span> Quy trình hoàn tất thành công!
+                </h3>
+                <button class="btn-exit" style="position:static; background:rgba(255,255,255,0.05); color:#eee; border-color:var(--border);" onclick="resetAll()">🔄 Làm video khác</button>
+            </div>
+
+            <!-- Stats Bar -->
+            <div class="result-stats" style="margin-bottom:16px;">
+                <div class="stat"><div class="value" id="segmentCount">0</div><div class="label">Câu phụ đề</div></div>
+                <div class="stat"><div class="value" id="videoDuration">0:00</div><div class="label">Thời lượng</div></div>
+                <div class="stat"><div class="value" id="totalTime">0s</div><div class="label">Tổng thời gian</div></div>
+                <div class="stat"><div class="value" id="processSpeed">0x</div><div class="label">Tốc độ xử lý</div></div>
+            </div>
+
+            <!-- TRUNG TÂM TẢI FILE THÀNH PHẨM (DOWNLOAD HUB) -->
+            <div style="background:rgba(0,0,0,0.25); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px;">
+                <div style="font-size:13px; font-weight:700; color:var(--text-primary); margin-bottom:10px;">
+                    📦 Tải xuống các tệp thành phẩm:
+                </div>
+                <div class="download-hub-grid">
+                    <a id="dlSourceVideo" class="btn-studio-action" style="padding:10px; font-size:12px; display:none;" href="#" target="_blank">
+                        📥 Tải Video Gốc Master
+                    </a>
+                    <a id="dlZhSrt" class="btn-studio-action" style="padding:10px; font-size:12px; display:none;" href="#" target="_blank">
+                        📝 Tải Sub Gốc (.SRT Trung)
+                    </a>
+                    <a id="dlTargetSrt" class="btn-studio-action btn-studio-green" style="padding:10px; font-size:12px; display:none;" href="#" target="_blank">
+                        📝 Tải Sub Đã Dịch (.SRT)
+                    </a>
+                    <a id="dlCleanVideo" class="btn-studio-action" style="padding:10px; font-size:12px; display:none; background:rgba(16,185,129,0.15); border-color:#10b981; color:#34d399;" href="#" target="_blank">
+                        🧹 Tải Video Sạch Chữ
+                    </a>
+                    <a id="dlTtsAudio" class="btn-studio-action btn-studio-orange" style="padding:10px; font-size:12px; display:none;" href="#" target="_blank">
+                        🎙️ Tải Audio Thuyết Minh (.MP3)
+                    </a>
+                    <a id="dlFinalVideo" class="btn-studio-action" style="padding:10px; font-size:12px; display:none; background:linear-gradient(135deg, #f97316, #ef4444); color:#fff; font-weight:700;" href="#" target="_blank">
+                        🎬 Tải Video Hoàn Chỉnh (Đã In Sub)
+                    </a>
+                </div>
+            </div>
+
+            <!-- Xem trước SRT -->
+            <div class="studio-card card-srt" style="margin-top:14px;">
+                <div class="studio-card-header">
+                    <div class="studio-card-title" style="color:#a78bfa;">
+                        <span>📁</span> 📝 BẢNG XEM TRƯỚC PHỤ ĐỀ
+                    </div>
+                </div>
+                <div class="srt-tabs" id="srtTabs"></div>
+                <div class="srt-preview" id="srtPreview"></div>
+            </div>
+        </div>
+
+    </div>
+
+
+
+        </div>
+
+        <!-- ================================================================= -->
+        <!-- CHẾ ĐỘ 2: HỘP CÔNG CỤ RỜI (TOOLBOX)                               -->
+        <!-- ================================================================= -->
+        <div class="card" id="cardToolboxView" style="display:none;">
+            <div class="toolbox-tabs">
+                <button type="button" class="toolbox-tab-btn active" onclick="switchToolboxTab('tool_dy')">📥 1. Tải Video Douyin</button>
+                <button type="button" class="toolbox-tab-btn" onclick="switchToolboxTab('tool_sub')">🔍 2. Trích &amp; Dịch Sub</button>
+                <button type="button" class="toolbox-tab-btn" onclick="switchToolboxTab('tool_clean')">🧹 3. Xóa Chữ Video</button>
+                <button type="button" class="toolbox-tab-btn" onclick="switchToolboxTab('tool_srttts')">🎙️ 4. SRT sang TTS</button>
+                <button type="button" class="toolbox-tab-btn" onclick="switchToolboxTab('tool_burn')">🎬 5. In Sub Vào Video</button>
+            </div>
+
+            <!-- TOOL 1: TẢI VIDEO DOUYIN -->
+            <div id="toolPaneDy">
+                <div style="font-size:14px; font-weight:700; color:#3b82f6; margin-bottom:8px;">📥 Tải Video Gốc Douyin Master (Không Watermark)</div>
+                <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">Nhập link chia sẻ từ app Douyin hoặc link https://v.douyin.com/... để tải ngay bản gốc chất lượng cao nhất trực tiếp từ CDN.</p>
+                <div class="url-input-group">
+                    <input type="text" class="url-input" id="toolDyInput" placeholder="Dán link Douyin vào đây...">
+                    <button type="button" class="btn-paste" onclick="pasteToolDyUrl()">📋 Dán</button>
+                </div>
+                <button class="btn-primary-studio" style="background:linear-gradient(135deg, #3b82f6, #1d4ed8); margin-top:14px;" onclick="runToolDownloadDouyin()">
+                    <span>⬇️ Tải Video Gốc Master</span>
+                </button>
+            </div>
+
+            <!-- TOOL 2: TRÍCH & DỊCH SUB -->
+            <div id="toolPaneSub" style="display:none;">
+                <div style="font-size:14px; font-weight:700; color:#8b5cf6; margin-bottom:8px;">🔍 Chỉ Trích Xuất &amp; Dịch Phụ Đề (.SRT)</div>
+                <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">Nhận diện hardsub tiếng Trung trên video và dịch ra file phụ đề .SRT song ngữ để bạn tự dùng.</p>
+                <div class="upload-zone" onclick="document.getElementById('toolSubFileInput').click()">
+                    <div class="icon">🔍</div>
+                    <h3>Chọn video để trích xuất phụ đề</h3>
+                    <input type="file" id="toolSubFileInput" accept="video/*" style="display:none;" onchange="onToolSubFileSelected(event)">
+                </div>
+                <div id="toolSubFileInfo" style="display:none; padding:8px 12px; background:rgba(255,255,255,0.04); border-radius:8px; margin-top:8px; font-size:12px;"></div>
+                <button class="btn-primary-studio" style="background:linear-gradient(135deg, #8b5cf6, #6366f1); margin-top:14px;" onclick="runToolExtractSub()">
+                    <span>🔍 Bắt Đầu Trích Xuất Sub (.SRT)</span>
+                </button>
+            </div>
+
+            <!-- TOOL 3: XÓA CHỮ VIDEO -->
+            <div id="toolPaneClean" style="display:none;">
+                <div style="font-size:14px; font-weight:700; color:#10b981; margin-bottom:8px;">🧹 Chỉ Xóa Chữ / Logo Video (Clean Plate)</div>
+                <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">Tẩy sạch phụ đề tiếng Trung cũ hoặc logo để xuất ra video sạch không còn chữ, giữ 100% âm thanh gốc.</p>
+                <div class="upload-zone" onclick="document.getElementById('toolCleanFileInput').click()">
+                    <div class="icon">🧹</div>
+                    <h3>Chọn video để xóa chữ</h3>
+                    <input type="file" id="toolCleanFileInput" accept="video/*" style="display:none;" onchange="onToolCleanFileSelected(event)">
+                </div>
+                <div id="toolCleanFileInfo" style="display:none; padding:8px 12px; background:rgba(255,255,255,0.04); border-radius:8px; margin-top:8px; font-size:12px;"></div>
+                <button class="btn-primary-studio" style="background:linear-gradient(135deg, #10b981, #059669); margin-top:14px;" onclick="runToolCleanVideo()">
+                    <span>🧹 Bắt Đầu Xóa Chữ (Clean Plate)</span>
+                </button>
+            </div>
+
+            <!-- TOOL 4: PHỤ ĐỀ SRT SANG TTS -->
+            <div id="toolPaneSrtTts" style="display:none;">
+<div class="input-panel active" id="panelSrtTts" style="display:block; margin-top: 0;">
+                <div style="background: linear-gradient(135deg, rgba(16,185,129,0.1), rgba(59,130,246,0.1)); border: 1px solid rgba(16,185,129,0.3); border-radius: 12px; padding: 16px; margin-bottom: 18px;">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+                        <span style="font-size: 24px;">🎙️</span>
+                        <div>
+                            <span style="font-size: 15px; font-weight: 700; color: #10b981;">Chuyển Đổi Phụ Đề (.SRT) Sang Thuyết Minh TTS</span>
+                            <span style="margin-left:8px; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: rgba(16,185,129,0.2); color: #10b981; border: 1px solid rgba(16,185,129,0.35);">Khớp Timeline • 0% Chồng Chéo</span>
+                        </div>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
+                        Tạo audio thuyết minh trực tiếp từ file phụ đề .srt đã dịch. Hệ thống tự động cắt tỉa khoảng lặng thừa, điều chỉnh tốc độ mượt mà bằng atempo, bảo đảm <strong>thời lượng audio khớp đúng thời lượng phụ đề</strong> và <strong>các đoạn thoại không chồng chéo nhau</strong>.
+                    </div>
+                </div>
+
+                <div style="display:flex; gap:10px; margin-bottom:12px;">
+                    <button type="button" class="btn-secondary" id="btnSrtModeUpload" onclick="switchSrtInputMode('file')" style="flex:1; padding:8px; font-weight:600; font-size:12px; border-color:#10b981; color:#10b981; background:rgba(16,185,129,0.08);">📁 Tải file .srt</button>
+                    <button type="button" class="btn-secondary" id="btnSrtModePaste" onclick="switchSrtInputMode('paste')" style="flex:1; padding:8px; font-weight:600; font-size:12px;">📝 Dán nội dung .srt</button>
+                </div>
+
+                <div id="srtUploadBox" class="upload-zone" style="padding:24px 16px; margin-bottom:14px; border:2px dashed rgba(16,185,129,0.3); background:rgba(16,185,129,0.03);" onclick="document.getElementById('srtFileInput').click()">
+                    <div class="icon" style="font-size:32px;">📑</div>
+                    <h4 style="margin:6px 0; font-size:14px; color:var(--text-primary);">Kéo thả hoặc nhấn để chọn file phụ đề .srt</h4>
+                    <p style="font-size:11px; color:var(--text-muted); margin:0;" id="srtFileLabel">Hỗ trợ file .srt mã hóa UTF-8 tiêu chuẩn</p>
+                    <input type="file" id="srtFileInput" accept=".srt" style="display:none;" onchange="onSrtFileSelected(event)">
+                </div>
+
+                <div id="srtPasteBox" style="display:none; margin-bottom:14px;">
+                    <textarea id="srtTextInput" rows="7" placeholder="Dán nội dung phụ đề SRT vào đây...&#10;Ví dụ:&#10;1&#10;00:00:01,000 --> 00:00:03,500&#10;[M1] Lời thoại tiếng Việt dòng 1...&#10;&#10;2&#10;00:00:04,000 --> 00:00:06,000&#10;[F1] Lời thoại dòng 2..." style="width:100%; padding:12px; background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; color:var(--text-primary); font-family:monospace; font-size:12px; resize:vertical;" oninput="onSrtTextPasted()"></textarea>
+                </div>
+
+                <div id="srtSummaryBadge" style="display:none; align-items:center; justify-content:space-between; padding:8px 12px; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:8px; margin-bottom:14px; font-size:12px;">
+                    <span style="color:#10b981; font-weight:600;" id="srtSummaryText">📊 Nhận diện: 0 câu • Thời lượng: 0s</span>
+                    <button type="button" class="btn-exit" style="position:static; padding:2px 8px; font-size:11px;" onclick="clearSrtInput()">✕ Xóa</button>
+                </div>
+
+                <div class="quick-config-grid" style="margin-top:0;">
+                    <div class="quick-box">
+                        <div class="quick-box-title">🌐 Ngôn ngữ &amp; Engine TTS</div>
+                        <div style="display:flex; gap:8px; margin-bottom:8px;">
+                            <select id="srtTtsLang" style="flex:1; padding:8px; border-radius:6px; background:var(--bg-card); border:1px solid var(--border); color:var(--text-primary); font-size:12px;" onchange="updateSrtVoiceList()">
+                                <option value="vi" selected>🇻🇳 Tiếng Việt</option>
+                                <option value="en">🇬🇧 Tiếng Anh</option>
+                                <option value="id">🇮🇩 Tiếng Indonesia</option>
+                            </select>
+                            <select id="srtTtsEngine" style="flex:1; padding:8px; border-radius:6px; background:var(--bg-card); border:1px solid var(--border); color:var(--text-primary); font-size:12px;" onchange="updateSrtVoiceList()">
+                                <option value="edge" selected>⚡ Edge TTS (Miễn phí)</option>
+                                <option value="gemini">🤖 Gemini TTS</option>
+                            </select>
+                        </div>
+                        <div style="margin-top:4px;">
+                            <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;">Giọng đọc (hoặc tự động theo [M1]/[F1]):</label>
+                            <select id="srtTtsVoice" style="width:100%; padding:8px; border-radius:6px; background:var(--bg-card); border:1px solid var(--border); color:var(--text-primary); font-size:12px;">
+                                <option value="vi-VN-NamMinhNeural">Nam chính (Nam Minh - Truyền cảm)</option>
+                                <option value="vi-VN-HoaiMyNeural">Nữ chính (Hoài My - Trầm ấm)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="quick-box">
+                        <div class="quick-box-title">🎚️ Chế độ Căn chỉnh Timeline</div>
+                        <div style="margin-bottom:8px;">
+                            <select id="srtAlignMode" style="width:100%; padding:8px; border-radius:6px; background:var(--bg-card); border:1px solid var(--border); color:var(--text-primary); font-size:12px;">
+                                <option value="smart_sync" selected>⭐ Khớp thông minh chống chồng chéo (Khuyên dùng)</option>
+                                <option value="strict_sub">⏱️ Khớp nghiêm ngặt thời lượng dòng</option>
+                            </select>
+                        </div>
                         <div style="display:flex; gap:8px;">
-                            <label style="flex:1; display:flex; align-items:center; gap:8px; padding:8px 12px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; cursor:pointer;">
-                                <input type="radio" name="tts_engine" value="edge" checked onclick="setTTSEngine('edge')"> ⚡ Edge-TTS (Chuẩn, nhanh)
-                            </label>
-                            <label style="flex:1; display:flex; align-items:center; gap:8px; padding:8px 12px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; cursor:pointer;">
-                                <input type="radio" name="tts_engine" value="omnivoice" onclick="setTTSEngine('omnivoice')"> 🎤 OmniVoice (Clone giọng)
-                            </label>
-                            <label style="flex:1; display:flex; align-items:center; gap:8px; padding:8px 12px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; cursor:pointer;">
-                                <input type="radio" name="tts_engine" value="gemini" onclick="setTTSEngine('gemini')"> ✨ Gemini TTS
-                            </label>
+                            <div style="flex:1;">
+                                <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;">Đệm an toàn:</label>
+                                <select id="srtSafetyMargin" style="width:100%; padding:8px; border-radius:6px; background:var(--bg-card); border:1px solid var(--border); color:var(--text-primary); font-size:12px;">
+                                    <option value="40">40 ms</option>
+                                    <option value="60" selected>60 ms (Chuẩn)</option>
+                                    <option value="80">80 ms</option>
+                                    <option value="100">100 ms</option>
+                                </select>
+                            </div>
+                            <div style="flex:1;">
+                                <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;">Tốc độ nén tối đa:</label>
+                                <select id="srtMaxSpeed" style="width:100%; padding:8px; border-radius:6px; background:var(--bg-card); border:1px solid var(--border); color:var(--text-primary); font-size:12px;">
+                                    <option value="1.45" selected>1.45x (Tự nhiên)</option>
+                                    <option value="1.60">1.60x (Nhanh vừa)</option>
+                                    <option value="1.80">1.80x (Ép slot)</option>
+                                </select>
+                            </div>
                         </div>
-                        <input id="geminiTTSVoice" value="Puck" type="hidden">
-                        <input id="geminiTTSEmotion" value="warm" type="hidden">
-                        <input id="geminiTTSStyle" value="" type="hidden">
-                        
                     </div>
                 </div>
-            </div>
+
+                <button type="button" id="btnRunSrtTts" class="btn-primary-studio" onclick="runSrtToTts()" style="background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 18px rgba(16,185,129,0.35); margin-top:14px;" disabled>
+                    <span>🚀 Tạo Thuyết Minh Khớp Timeline SRT</span>
+                </button>
+
+                <div id="srtTtsProgressCard" style="display:none; background:var(--bg-secondary); border:1px solid rgba(16,185,129,0.3); border-radius:12px; padding:16px; margin-top:16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-size:13px; font-weight:600; color:var(--text-primary);" id="srtTtsProgressText">Đang khởi tạo thuyết minh...</span>
+                        <span style="font-size:14px; font-weight:700; color:#10b981;" id="srtTtsProgressPercent">0%</span>
+                    </div>
+                    <div class="progress-bar" style="background:rgba(255,255,255,0.05); height:8px; border-radius:4px; overflow:hidden;">
+                        <div id="srtTtsProgressFill" style="height:100%; width:0%; background:linear-gradient(90deg, #10b981, #3b82f6); transition:width 0.3s;"></div>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+                        <span style="font-size:11px; color:var(--text-muted);" id="srtTtsProgressMsg">Đang chuẩn bị...</span>
+                        <button class="btn-exit" style="position:static; padding:2px 8px; font-size:11px;" onclick="cancelSrtTts()">🛑 Hủy</button>
+                    </div>
+                </div>
+
+                <div id="srtTtsResultCard" style="display:none; background:var(--bg-secondary); border:1px solid rgba(16,185,129,0.4); border-radius:12px; padding:18px; margin-top:16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                        <div style="font-size:16px; font-weight:800; color:#10b981; display:flex; align-items:center; gap:8px;">
+                            <span>✅</span> Thuyết Minh Đã Sẵn Sàng!
+                        </div>
+                        <span style="font-size:11px; font-weight:600; color:#10b981; background:rgba(16,185,129,0.15); padding:3px 10px; border-radius:10px; border:1px solid rgba(16,185,129,0.3);">Khớp 100% Phụ Đề • 0% Chồng Chéo</span>
+                    </div>
+
+                    <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-bottom:16px; text-align:center;">
+                        <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:8px; border:1px solid var(--border);">
+                            <div style="font-size:18px; font-weight:800; color:#10b981;" id="resSrtSegCount">0</div>
+                            <div style="font-size:11px; color:var(--text-muted);">Số câu phụ đề</div>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:8px; border:1px solid var(--border);">
+                            <div style="font-size:18px; font-weight:800; color:#3b82f6;" id="resSrtSubDur">0s</div>
+                            <div style="font-size:11px; color:var(--text-muted);">Thời lượng phụ đề</div>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:8px; border:1px solid var(--border);">
+                            <div style="font-size:18px; font-weight:800; color:#f59e0b;" id="resSrtAudioDur">0s</div>
+                            <div style="font-size:11px; color:var(--text-muted);">Thời lượng audio TTS</div>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:8px; border:1px solid var(--border);">
+                            <div style="font-size:18px; font-weight:800; color:#22c55e;" id="resSrtOverlap">0%</div>
+                            <div style="font-size:11px; color:var(--text-muted);">Tỷ lệ chồng chéo</div>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom:14px; background:rgba(0,0,0,0.3); padding:12px; border-radius:10px; border:1px solid var(--border);">
+                        <div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:8px; display:flex; justify-content:space-between;">
+                            <span>🎧 Nghe thử audio thuyết minh đã khớp timeline:</span>
+                            <span id="resSrtAudioSize" style="color:var(--text-muted);">0 MB</span>
+                        </div>
+                        <audio id="srtTtsAudioPlayer" controls style="width:100%; height:40px; border-radius:6px;"></audio>
+                    </div>
+
+                    <div style="display:flex; gap:10px; margin-bottom:14px;">
+                        <a id="btnDownloadSrtAudio" href="#" class="btn-primary-studio" style="flex:1.2; padding:12px; margin:0; background:linear-gradient(135deg, #10b981, #059669); text-decoration:none; display:flex; align-items:center; justify-content:center; gap:6px;">
+                            <span>📥</span> Tải Audio TTS (MP3)
+                        </a>
+                        <a id="btnDownloadSrtAligned" href="#" class="btn-secondary" style="flex:1; padding:12px; margin:0; border-color:#3b82f6; color:#3b82f6; text-decoration:none; display:flex; align-items:center; justify-content:center; gap:6px;">
+                            <span>📄</span> Tải SRT Đồng Bộ
+                        </a>
+                    </div>
+
+                    <div style="border-top:1px solid var(--border); padding-top:10px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleSrtTimelineTable()">
+                            <span style="font-size:12px; font-weight:600; color:var(--text-secondary);">📊 Xem bảng chi tiết khớp timeline từng câu</span>
+                            <span id="srtTimelineTableToggleIcon" style="font-size:12px;">▼</span>
+                        </div>
+                        <div id="srtTimelineTableContainer" style="display:none; margin-top:10px; max-height:260px; overflow-y:auto; border:1px solid var(--border); border-radius:8px;">
+                            <table style="width:100%; border-collapse:collapse; font-size:11px; text-align:left;">
+                                <thead style="background:rgba(255,255,255,0.04); color:var(--text-muted); position:sticky; top:0;">
+                                    <tr>
+                                        <th style="padding:6px 8px; border-bottom:1px solid var(--border);">STT</th>
+                                        <th style="padding:6px 8px; border-bottom:1px solid var(--border);">Mốc SRT Gốc</th>
+                                        <th style="padding:6px 8px; border-bottom:1px solid var(--border);">Mốc TTS Thực Tế</th>
+                                        <th style="padding:6px 8px; border-bottom:1px solid var(--border);">Nội Dung</th>
+                                        <th style="padding:6px 8px; border-bottom:1px solid var(--border);">Tốc Độ</th>
+                                        <th style="padding:6px 8px; border-bottom:1px solid var(--border);">Trạng Thái</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="srtTimelineTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- BẢNG ĐIỀU KHIỂN DOUYIN AUTOMATION ĐỘC LẬP -->
             <!-- PANEL DOUYIN AUTOMATION (GIÁM SÁT KÊNH TỰ ĐỘNG) -->
-            <div class="input-panel" id="panelDouyin" style="display:none; margin-top: 14px;">
+            </div>
+
+            <!-- TOOL 5: IN SUB VÀO VIDEO -->
+            <div id="toolPaneBurn" style="display:none;">
+                <div style="font-size:14px; font-weight:700; color:#f97316; margin-bottom:8px;">🎬 In Phụ Đề Đã Dịch Vào Video Có Sẵn (Burn Sub)</div>
+                <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">Ghép file phụ đề .SRT vào video có sẵn, tùy chọn giữ nguyên tiếng hoặc lồng tiếng mới.</p>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+                    <div>
+                        <label style="font-size:12px; font-weight:600; display:block; margin-bottom:6px;">1. Chọn file video:</label>
+                        <input type="file" id="toolBurnVideoInput" accept="video/*" style="width:100%; padding:8px; background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; color:var(--text-primary); font-size:12px;">
+                    </div>
+                    <div>
+                        <label style="font-size:12px; font-weight:600; display:block; margin-bottom:6px;">2. Chọn file phụ đề .SRT:</label>
+                        <input type="file" id="toolBurnSrtInput" accept=".srt" style="width:100%; padding:8px; background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; color:var(--text-primary); font-size:12px;">
+                    </div>
+                </div>
+                <button class="btn-primary-studio" style="margin-top:14px;" onclick="runToolBurnSub()">
+                    <span>🎬 In Phụ Đề Vào Video</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- ================================================================= -->
+        <!-- CHẾ ĐỘ 3: GIÁM SÁT KÊNH DOUYIN TỰ ĐỘNG                           -->
+        <!-- ================================================================= -->
+        <div class="card" id="cardDouyinView" style="display:none;">
+<div class="input-panel active" id="panelDouyin" style="display:block; margin-top: 0;">
                 <!-- MONITOR STATUS & CONTROLS BANNER -->
                 <div style="background: linear-gradient(135deg, rgba(239,68,68,0.08), rgba(168,85,247,0.08)); border: 1px solid rgba(239,68,68,0.25); border-radius: 12px; padding: 16px; margin-bottom: 20px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
@@ -587,246 +1017,673 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
             <div class="error-msg" id="errorMsg"></div>
         </div>
 
-        <!-- BƯỚC 2: TIẾN TRÌNH XỬ LÝ TRỰC QUAN -->
-        <div class="card progress-section" id="progressSection">
-            <!-- Horizontal Stepper -->
-            <div class="stepper-container">
-                <div class="step-node active" id="step_trim">
-                    <div class="step-circle">✂️</div>
-                    <div class="step-title">1. Cắt bìa</div>
-                </div>
-                <div class="step-divider" id="line_1"></div>
-                <div class="step-node" id="step_asr">
-                    <div class="step-circle">🎤</div>
-                    <div class="step-title">2. Nhận dạng</div>
-                </div>
-                <div class="step-divider" id="line_2"></div>
-                <div class="step-node" id="step_trans">
-                    <div class="step-circle">🌍</div>
-                    <div class="step-title">3. Dịch AI</div>
-                </div>
-                <div class="step-divider" id="line_3"></div>
-                <div class="step-node" id="step_tts">
-                    <div class="step-circle">🎙️</div>
-                    <div class="step-title">4. Lồng tiếng</div>
-                </div>
-            </div>
-
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <span style="font-size:13px; font-weight:600; color:var(--text-primary);" id="statusText">Đang xử lý video...</span>
-                <span style="font-size:14px; font-weight:700; color:var(--accent);" id="progressPercent">0%</span>
-            </div>
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill"></div>
-            </div>
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-size:12px; color:var(--text-muted);" id="statusMessage">Đang chuẩn bị...</span>
-                <button class="btn-exit" style="position:static; padding:4px 10px;" onclick="stopJob()">🛑 Hủy tiến trình</button>
-            </div>
-            <div id="translateProgressList" style="margin-top:12px;"></div>
-        </div>
-
-        <!-- BƯỚC 3: TRUNG TÂM XUẤT BẢN STUDIO (STUDIO EXPORT HUB) -->
-        <div class="card result-section" id="resultSection">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-                <h3 style="margin:0; font-size:18px; font-weight:800; color:#10b981; display:flex; align-items:center; gap:8px;">
-                    <span>✅</span> Trích xuất &amp; Xử lý hoàn tất!
-                </h3>
-                <button class="btn-exit" style="position:static; background:rgba(255,255,255,0.05); color:#eee; border-color:var(--border);" onclick="resetAll()">🔄 Làm video khác</button>
-            </div>
-
-            <!-- Stats Bar -->
-            <div class="result-stats">
-                <div class="stat"><div class="value" id="segmentCount">0</div><div class="label">Câu phụ đề</div></div>
-                <div class="stat"><div class="value" id="videoDuration">0:00</div><div class="label">Thời lượng</div></div>
-                <div class="stat"><div class="value" id="totalTime">0s</div><div class="label">Tổng thời gian</div></div>
-                <div class="stat"><div class="value" id="processSpeed">0x</div><div class="label">Tốc độ xử lý</div></div>
-            </div>
-
-            <!-- Badge thông báo cắt bìa -->
-            <div class="badge-trimmed" id="trimmedBadgeRow" style="display:none;">
-                <span>✂️</span> <span id="trimmedBadgeText"></span>
-            </div>
-
-            <!-- 3 THẺ HÀNH ĐỘNG ĐỘC LẬP -->
-            <div class="studio-hub-grid">
-
-                <!-- THẺ A: PHỤ ĐỀ SRT & LỜI THOẠI -->
-                <div class="studio-card card-srt">
-                    <div class="studio-card-header">
-                        <div class="studio-card-title" style="color:#a78bfa;">
-                            <span>📁</span> 📝 PHỤ ĐỀ SRT &amp; LỜI THOẠI SONG NGỮ
-                        </div>
-                    </div>
-                    <div class="studio-card-desc">Xem trước bản dịch song ngữ, chỉnh sửa và tải file .srt độc lập.</div>
-                    
-                    <div class="srt-tabs" id="srtTabs"></div>
-                    <div class="srt-preview" id="srtPreview"></div>
-
-                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-                        <div class="download-row" id="downloadRow" style="margin:0;"></div>
-                        <div class="tts-row" id="ttsRow" style="margin:0;"></div>
-                    </div>
-
-                    <!-- Multi-Speaker Manager nếu có -->
-                    <div id="speakerManagerCard" style="display:none; margin-top:14px; padding:12px; background:rgba(0,0,0,0.25); border:1px solid var(--border); border-radius:10px;">
-                        <div style="font-size:12px; font-weight:600; margin-bottom:8px; color:#a78bfa;">🎭 Phân vai nhân vật &amp; Giọng đọc:</div>
-                        <div id="speakerList" style="display:flex; flex-direction:column; gap:6px;"></div>
-                    </div>
-                </div>
-
-                <!-- THẺ B: 1. CHỈ XỬ LÝ XÓA HARDSUB / CHỮ TRUNG CŨ (CLEAN PLATE) -->
-                <div class="studio-card card-clean">
-                    <div class="studio-card-header">
-                        <div class="studio-card-title" style="color:#10b981;">
-                            <span>🧹</span> 🧹 1. XUẤT VIDEO SẠCH CHỮ (CLEAN PLATE)
-                        </div>
-                        <span style="font-size:11px; padding:3px 8px; border-radius:12px; background:rgba(16,185,129,0.15); color:#10b981; font-weight:600;">Không in sub mới</span>
-                    </div>
-                    <div class="studio-card-desc">
-                        Xóa phụ đề tiếng Trung, logo hoặc banner cũ bằng AI Inpainting. Xuất video sạch để bạn tự mang vào CapCut/Premiere dựng phim.
-                    </div>
-
-                    <!-- Tùy chọn thành phần muốn xóa -->
-                    <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px; background:rgba(0,0,0,0.25); padding:12px 14px; border-radius:10px; border:1px solid var(--border);">
-                        <span style="font-size:12px; font-weight:700; color:var(--text-primary);">🎯 Chọn thành phần muốn xóa:</span>
-                        <label style="display:flex; align-items:center; gap:8px; font-size:12px; cursor:pointer;">
-                            <input type="checkbox" id="cleanChkHardsub" checked style="cursor:pointer;">
-                            <span>☑️ <b>Xóa phụ đề tiếng Trung dưới chân video (Hardsub)</b></span>
-                        </label>
-                        <label style="display:flex; align-items:center; gap:8px; font-size:12px; cursor:pointer;">
-                            <input type="checkbox" id="cleanChkLogo" style="cursor:pointer;">
-                            <span>🏷️ <b>Xóa logo kênh / watermark Douyin gốc (ở góc video)</b></span>
-                        </label>
-                        <label style="display:flex; align-items:center; gap:8px; font-size:12px; cursor:pointer;">
-                            <input type="checkbox" id="cleanChkTitle" style="cursor:pointer;">
-                            <span>🏷️ <b>Xóa banner tiêu đề tiếng Trung phía trên (Top Title)</b></span>
-                        </label>
-                    </div>
-
-                    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-                        <div style="display:flex; align-items:center; gap:8px;">
-                            <span style="font-size:12px; color:var(--text-muted);">Động cơ xóa:</span>
-                            <select id="cleanEngineSelect" style="padding:8px 12px; background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; color:var(--text-primary); font-size:12px; font-weight:600;">
-                                <option value="opencv" selected>⚡ OpenCV Inpaint (Siêu nhanh 200 fps)</option>
-                                <option value="lama">🌟 LaMa AI Inpaint (Sạch bóng chất lượng cao)</option>
-                            </select>
-                        </div>
-                        <button class="btn-studio-action btn-studio-green" id="btnRunCleanPlate" onclick="runStudioCleanPlate()">
-                            <span>🧹 Bắt đầu xóa chữ &amp; Logo (Clean Plate)</span>
-                        </button>
-                    </div>
-                    <div id="cleanPlateResultRow" style="display:none; margin-top:12px; padding:10px 14px; background:rgba(16,185,129,0.1); border:1px solid #10b981; border-radius:8px; align-items:center; justify-content:space-between;">
-                        <span id="cleanPlateStatusText" style="font-size:12px; color:#10b981; font-weight:600;">✅ Video sạch chữ đã sẵn sàng!</span>
-                        <a id="btnDownloadCleanPlate" class="btn-studio-action btn-studio-green" style="padding:6px 14px; font-size:12px;" href="#">📥 Tải video sạch chữ</a>
-                    </div>
-                </div>
-
-                <!-- THẺ C: 2. BURN SUB MỚI & LỒNG TIẾNG THÀNH PHẨM -->
-                <div class="studio-card card-burn">
-                    <div class="studio-card-header">
-                        <div class="studio-card-title" style="color:#f97316;">
-                            <span>🎬</span> 🎬 2. XUẤT VIDEO LỒNG TIẾNG &amp; IN SUB MỚI (THÀNH PHẨM)
-                        </div>
-                        <span style="font-size:11px; padding:3px 8px; border-radius:12px; background:rgba(249,115,22,0.15); color:#f97316; font-weight:600;">Video hoàn chỉnh</span>
-                    </div>
-                    <div class="studio-card-desc">
-                        In phụ đề mới đã dịch lên video, tùy chọn lồng tiếng và tách nhạc nền AI chuẩn phòng thu.
-                    </div>
-
-                    <!-- Tùy chọn thành phần xử lý hình ảnh -->
-                    <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px; background:rgba(0,0,0,0.25); padding:12px 14px; border-radius:10px; border:1px solid var(--border);">
-                        <span style="font-size:12px; font-weight:700; color:var(--text-primary);">🎯 Tùy chọn xử lý thành phần video:</span>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                            <label style="display:flex; align-items:center; gap:8px; font-size:12px; cursor:pointer;">
-                                <input type="checkbox" id="burnChkCleanHardsub" checked style="cursor:pointer;">
-                                <span>🧹 Xóa hardsub tiếng Trung cũ</span>
-                            </label>
-                            <label style="display:flex; align-items:center; gap:8px; font-size:12px; cursor:pointer;">
-                                <input type="checkbox" id="burnChkCleanLogo" style="cursor:pointer;">
-                                <span>🏷️ Xóa logo / watermark gốc</span>
-                            </label>
-                            <label style="display:flex; align-items:center; gap:8px; font-size:12px; cursor:pointer;">
-                                <input type="checkbox" id="burnChkTranslateTitle" checked style="cursor:pointer;">
-                                <span>✨ Dịch banner tiêu đề trên</span>
-                            </label>
-                            <label style="display:flex; align-items:center; gap:8px; font-size:12px; cursor:pointer;">
-                                <input type="checkbox" id="burnChkBurnSub" checked style="cursor:pointer;">
-                                <span>📝 In phụ đề mới đã dịch</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
-                        <!-- Ngôn ngữ in sub -->
-                        <div class="quick-box">
-                            <div class="quick-box-title">📝 Ngôn ngữ in sub lên video:</div>
-                            <select id="burnSubLangSelect" style="width:100%; padding:8px 10px; background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:12px; font-weight:600;"></select>
-                        </div>
-
-                        <!-- Chế độ in sub -->
-                        <div class="quick-box">
-                            <div class="quick-box-title">🎨 Chế độ xử lý chữ:</div>
-                            <select id="burnSubModeSelect" style="width:100%; padding:8px 10px; background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:12px; font-weight:600;">
-                                <option value="inpaint_burn" selected>🌟 Xóa sạch chữ cũ + In sub mới (Đẹp nhất)</option>
-                                <option value="blur">⚡ Che mờ viền mềm + In sub mới (Nhanh)</option>
-                                <option value="pure_burn">📝 Chỉ burn sub mới (In trực tiếp, không xóa nền)</option>
-                            </select>
-                        </div>
-
-                        <!-- Âm thanh & Nhạc nền -->
-                        <div class="quick-box quick-box-full">
-                            <div class="quick-box-title">🎵 Lồng tiếng &amp; Nhạc nền gốc (BGM):</div>
-                            <div style="display:grid; grid-template-columns:2fr 1fr; gap:10px; align-items:center;">
-                                <select id="burnBgmSelect" style="padding:8px 10px; background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:12px; font-weight:600;">
-                                    <option value="orig_only" selected>🔊 1. Giữ nguyên 100% âm thanh gốc (Không lồng tiếng TTS)</option>
-                                    <option value="ai">🌟 2. Tách nhạc AI (Demucs - Xóa sạch tiếng Trung &amp; Lồng tiếng mới)</option>
-                                    <option value="duck">⚡ 3. Giảm âm Ducking (Giữ âm gốc nhỏ dần khi có giọng đọc mới)</option>
-                                    <option value="none">🔇 4. Tắt âm gốc (Chỉ giữ giọng đọc lồng tiếng mới)</option>
-                                </select>
-                                <div style="display:flex; align-items:center; gap:6px;">
-                                    <span style="font-size:11px; color:var(--text-muted); white-space:nowrap;">Âm BGM:</span>
-                                    <input type="range" id="burnBgmSlider" min="0.1" max="1.0" step="0.05" value="0.8" style="flex:1;" oninput="document.getElementById('burnBgmVolVal').textContent = Math.round(this.value * 100) + '%'">
-                                    <span id="burnBgmVolVal" style="font-size:11px; color:#f97316; font-weight:700; width:34px;">80%</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Tiêu đề & Bản quyền -->
-                        <div class="quick-box quick-box-full" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-                            <label style="display:flex; align-items:center; gap:8px; font-size:12px; cursor:pointer;">
-                                <input type="checkbox" id="burnTranslateTitleChk" checked style="cursor:pointer;">
-                                <span>🏷️ Dịch thay thế banner tiêu đề trên cùng (Top Hook Title)</span>
-                            </label>
-                            <div style="display:flex; align-items:center; gap:6px;">
-                                <span style="font-size:11px; color:var(--text-muted);">Watermark:</span>
-                                <input type="text" id="burnBrandInput" placeholder="Tên kênh (tùy chọn)" style="padding:5px 10px; border-radius:6px; border:1px solid var(--border); background:rgba(0,0,0,0.3); color:var(--text-primary); font-size:11px; width:150px;">
-                            </div>
-                        </div>
-                    </div>
-
-                    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-                        <button class="btn-studio-action btn-studio-orange" id="btnRunStudioBurn" onclick="runStudioBurnSub()">
-                            <span>🎬 Bắt đầu xuất video Sub mới &amp; Lồng tiếng</span>
-                        </button>
-                        <button onclick="openFineTuneModal()" style="background:none; border:none; color:#888; font-size:12px; cursor:pointer; text-decoration:underline;">
-                            📐 Kéo thả chỉnh vùng phụ đề thủ công / Preset
-                        </button>
-                    </div>
-
-                    <div id="burnStudioResultRow" style="display:none; margin-top:14px; padding:10px 14px; background:rgba(249,115,22,0.1); border:1px solid #f97316; border-radius:8px; align-items:center; justify-content:space-between;">
-                        <span id="burnStudioStatusText" style="font-size:12px; color:#f97316; font-weight:600;">✅ Video thành phẩm đã sẵn sàng!</span>
-                        <a id="btnDownloadBurnStudio" class="btn-studio-action btn-studio-orange" style="padding:6px 14px; font-size:12px;" href="#">📥 Tải video thành phẩm</a>
-                    </div>
-                </div>
-
-            </div>
-        </div>
-        <div class="footer"><p>Powered by <a href="https://github.com/SYSTRAN/faster-whisper">faster-whisper</a> + <a href="https://github.com/nidhaloff/deep-translator">deep-translator</a> • Built with ❤️</p></div>
-    </div>
+        <script>
+    // --- LOAD DEVICE INFO IMMEDIATELY ---
+    async function loadDeviceInfo() {
+        const badge = document.getElementById('deviceBadge');
+        if (!badge) return;
+        try {
+            const res = await fetch('/api/device', { cache: 'no-store' });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            if (data.device === 'CUDA') {
+                badge.className = 'device-badge gpu';
+                badge.textContent = '⚡ GPU: ' + data.gpu_name + ' | ' + data.compute_type;
+            } else {
+                badge.className = 'device-badge cpu';
+                badge.textContent = '💻 CPU: ' + data.cpu_threads + ' threads | ' + data.compute_type;
+            }
+        } catch(e) {
+            console.error('Device info error:', e);
+            badge.textContent = '⚠️ Không thể kiểm tra device';
+            badge.className = 'device-badge cpu';
+        }
+    }
+    loadDeviceInfo(); updatePipelineVoiceList();
+    window.addEventListener('DOMContentLoaded', loadDeviceInfo);
 
 
-    <script>
+    // =========================================================================
+    // STUDIO PIPELINE & UI ORCHESTRATION SCRIPT
+    // =========================================================================
+    let currentMainMode = 'pipeline';
+    let currentPipelinePreset = 'full_dub';
+    let pipeSourceType = 'url';
+    let pipeSelectedFile = null;
+    let pipelineJobId = null;
+    let pipelinePollInterval = null;
+
+    let toolSubSelectedFile = null;
+    let toolCleanSelectedFile = null;
+
+    function switchMainMode(mode) {
+        currentMainMode = mode;
+        document.getElementById('tabMainPipeline').classList.toggle('active', mode === 'pipeline');
+        document.getElementById('tabMainToolbox').classList.toggle('active', mode === 'toolbox');
+        document.getElementById('tabMainDouyin').classList.toggle('active', mode === 'douyin');
+
+        document.getElementById('cardPipelineView').style.display = (mode === 'pipeline') ? 'block' : 'none';
+        document.getElementById('cardToolboxView').style.display = (mode === 'toolbox') ? 'block' : 'none';
+        document.getElementById('cardDouyinView').style.display = (mode === 'douyin') ? 'block' : 'none';
+
+        if (mode === 'douyin') {
+            loadDouyinMonitorStatus();
+            loadDouyinChannels();
+        }
+    }
+
+    function setPipelineSource(src) {
+        pipeSourceType = src;
+        document.getElementById('pipeSrcBtnUrl').classList.toggle('active', src === 'url');
+        document.getElementById('pipeSrcBtnUpload').classList.toggle('active', src === 'upload');
+        document.getElementById('pipeBoxUrl').style.display = (src === 'url') ? 'block' : 'none';
+        document.getElementById('pipeBoxUpload').style.display = (src === 'upload') ? 'block' : 'none';
+    }
+
+    function pastePipeUrl() {
+        navigator.clipboard.readText().then(text => {
+            document.getElementById('pipeUrlInput').value = text.trim();
+            validatePipeUrl();
+        }).catch(() => {
+            document.getElementById('pipeUrlInput').focus();
+        });
+    }
+
+    function validatePipeUrl() {
+        const url = document.getElementById('pipeUrlInput').value.trim();
+        const st = document.getElementById('pipeUrlStatus');
+        if (!url) {
+            st.textContent = '';
+            return;
+        }
+        if (url.includes('douyin.com') || url.includes('v.douyin')) {
+            st.textContent = '✅ Phát hiện link Douyin (Sẽ tải bản Master CDN không watermark)';
+            st.style.color = '#10b981';
+        } else {
+            st.textContent = '🌐 Link video Web (Sẽ xử lý qua yt-dlp)';
+            st.style.color = '#3b82f6';
+        }
+    }
+
+    function onPipeFileSelected(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        pipeSelectedFile = file;
+        document.getElementById('pipeFileNameText').textContent = "🎥 " + file.name + " (" + (file.size / 1048576).toFixed(1) + "MB)";
+        document.getElementById('pipeFileInfo').style.display = 'flex';
+        document.getElementById('chkStep1').checked = false;
+        updateStepState(1);
+    }
+
+    function clearPipeFile() {
+        pipeSelectedFile = null;
+        document.getElementById('pipeFileInput').value = '';
+        document.getElementById('pipeFileInfo').style.display = 'none';
+        document.getElementById('chkStep1').checked = true;
+        updateStepState(1);
+    }
+
+    function applyPipelinePreset(presetKey) {
+        currentPipelinePreset = presetKey;
+        document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('active'));
+        if (presetKey === 'full_dub') document.getElementById('presetFullDub').classList.add('active');
+        if (presetKey === 'pure_vietsub') document.getElementById('presetVietsub').classList.add('active');
+        if (presetKey === 'editor_kit') document.getElementById('presetEditor').classList.add('active');
+        if (presetKey === 'custom') document.getElementById('presetCustom').classList.add('active');
+
+        if (presetKey === 'full_dub') {
+            document.getElementById('chkStep1').checked = true;
+            document.getElementById('chkStep2').checked = true;
+            document.getElementById('chkStep3').checked = true;
+            document.getElementById('chkStep4').checked = true;
+            document.getElementById('chkStep5').checked = true;
+            document.getElementById('pipeAudioModeSelect').value = 'tts_ducking';
+        } else if (presetKey === 'pure_vietsub') {
+            document.getElementById('chkStep1').checked = true;
+            document.getElementById('chkStep2').checked = true;
+            document.getElementById('chkStep3').checked = true;
+            document.getElementById('chkStep4').checked = false;
+            document.getElementById('chkStep5').checked = true;
+            document.getElementById('pipeAudioModeSelect').value = 'keep_original';
+        } else if (presetKey === 'editor_kit') {
+            document.getElementById('chkStep1').checked = true;
+            document.getElementById('chkStep2').checked = true;
+            document.getElementById('chkStep3').checked = true;
+            document.getElementById('chkStep4').checked = false;
+            document.getElementById('chkStep5').checked = false;
+        }
+
+        for (let i = 1; i <= 5; i++) updateStepState(i);
+    }
+
+    
+    function updatePipelineVoiceList() {
+        const langEl = document.getElementById('pipeTargetLang');
+        const voiceEl = document.getElementById('pipeVoiceSelect');
+        if (!langEl || !voiceEl) return;
+        const lang = langEl.value;
+        voiceEl.innerHTML = '';
+
+        if (lang === 'en') {
+            voiceEl.add(new Option('🌟 Andrew - Nam chuẩn Mỹ tự nhiên nhất (Microsoft Copilot Flagship) [Khuyên dùng]', 'en-US-AndrewMultilingualNeural'));
+            voiceEl.add(new Option('🌟 Ava - Nữ chuẩn Mỹ biểu cảm ấm áp (Microsoft Copilot Flagship) [Khuyên dùng]', 'en-US-AvaMultilingualNeural'));
+            voiceEl.add(new Option('🎙️ Brian - Nam đời thường, gần gũi (Review xe, Podcast, Vlog)', 'en-US-BrianMultilingualNeural'));
+            voiceEl.add(new Option('🎙️ Emma - Nữ trẻ trung, sinh động, rõ ràng', 'en-US-EmmaMultilingualNeural'));
+            voiceEl.add(new Option('🎬 Christopher - Nam trầm ấm, phóng sự, phim tài liệu', 'en-US-ChristopherNeural'));
+            voiceEl.add(new Option('📻 Aria - Nữ phát thanh viên chuyên nghiệp, tự tin', 'en-US-AriaNeural'));
+            voiceEl.add(new Option('⚡ Guy - Nam năng động, nhiệt huyết', 'en-US-GuyNeural'));
+            voiceEl.add(new Option('🌸 Jenny - Nữ dịu dàng, êm dịu', 'en-US-JennyNeural'));
+        } else if (lang === 'vi') {
+            voiceEl.add(new Option('Nam Minh (Nam chính truyền cảm, chuẩn giọng Bắc) [Khuyên dùng]', 'vi-VN-NamMinhNeural'));
+            voiceEl.add(new Option('Hoài My (Nữ chính trầm ấm, kể chuyện, truyền hình) [Khuyên dùng]', 'vi-VN-HoaiMyNeural'));
+        } else if (lang === 'id') {
+            voiceEl.add(new Option('Ardi (Pria Utama - Nam Indonesia)', 'id-ID-ArdiNeural'));
+            voiceEl.add(new Option('Gadis (Wanita Utama - Nữ Indonesia)', 'id-ID-GadisNeural'));
+        }
+    }
+
+    function updateStepState(stepNum) {
+        const chk = document.getElementById('chkStep' + stepNum);
+        const item = document.getElementById('stepItem' + stepNum);
+        if (chk && item) {
+            item.classList.toggle('enabled', chk.checked);
+        }
+        updateStep5Notice();
+    }
+
+    function updateStep5Notice() {
+        const chk3 = document.getElementById('chkStep3');
+        const notice = document.getElementById('step5SourceNotice');
+        if (!notice) return;
+        if (chk3 && chk3.checked) {
+            notice.style.background = 'rgba(16,185,129,0.12)';
+            notice.style.borderColor = 'rgba(16,185,129,0.35)';
+            notice.style.color = '#34d399';
+            notice.innerHTML = '🟢 <b>Đã liên kết Bước 3:</b> Sẽ in phụ đề mới thẳng lên <b>Video đã xóa sạch chữ</b> (Chất lượng hoàn hảo, 100% không bị đè chữ cũ).';
+        } else {
+            notice.style.background = 'rgba(245,158,11,0.1)';
+            notice.style.borderColor = 'rgba(245,158,11,0.3)';
+            notice.style.color = '#fbbf24';
+            notice.innerHTML = '🟡 <b>Bước 3 đang tắt:</b> Sẽ in phụ đề mới lên <b>Video gốc</b> (Tự động che mờ viền mềm để tránh trùng lặp chữ cũ).';
+        }
+    }
+
+    function toggleStepBody(stepNum) {
+        const body = document.getElementById('stepBody' + stepNum);
+        const icon = document.getElementById('stepIcon' + stepNum);
+        if (!body) return;
+        const isOpen = body.style.display !== 'none';
+        body.style.display = isOpen ? 'none' : 'block';
+        if (icon) icon.textContent = isOpen ? '▼' : '▲';
+    }
+
+    async function runStudioPipeline() {
+        const btn = document.getElementById('btnRunPipeline');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span>⏳ Đang khởi động quy trình Studio...</span>';
+        }
+
+        try {
+            const url = document.getElementById('pipeUrlInput') ? document.getElementById('pipeUrlInput').value.trim() : '';
+            const trimCover = document.getElementById('pipeTrimCoverChk') ? document.getElementById('pipeTrimCoverChk').checked : true;
+            const trimMode = trimCover ? (document.getElementById('pipeTrimSelect') ? document.getElementById('pipeTrimSelect').value : 'auto') : 'off';
+
+            const payload = {
+                source_type: pipeSourceType,
+                url: url,
+                trim_intro: trimMode,
+                steps: {
+                    download: document.getElementById('chkStep1') ? document.getElementById('chkStep1').checked : true,
+                    extract_sub: document.getElementById('chkStep2') ? document.getElementById('chkStep2').checked : true,
+                    clean_video: document.getElementById('chkStep3') ? document.getElementById('chkStep3').checked : false,
+                    tts: document.getElementById('chkStep4') ? document.getElementById('chkStep4').checked : true,
+                    burn_sub: document.getElementById('chkStep5') ? document.getElementById('chkStep5').checked : true
+                },
+                sub_options: {
+                    engine: document.getElementById('pipeSubEngine') ? document.getElementById('pipeSubEngine').value : 'gemini',
+                    target_lang: document.getElementById('pipeTargetLang') ? document.getElementById('pipeTargetLang').value : 'vi',
+                    style: document.getElementById('pipeStyleSelect') ? document.getElementById('pipeStyleSelect').value : 'movie',
+                    translate_method: 'ai',
+                    pause_for_review: document.getElementById('pipePauseReviewChk') ? document.getElementById('pipePauseReviewChk').checked : false
+                },
+                clean_options: {
+                    region_mode: document.getElementById('pipeCleanRegionMode') ? document.getElementById('pipeCleanRegionMode').value : 'auto',
+                    engine: document.getElementById('pipeCleanEngine') ? document.getElementById('pipeCleanEngine').value : 'opencv',
+                    clean_hardsub: document.getElementById('pipeCleanChkSub') ? document.getElementById('pipeCleanChkSub').checked : true,
+                    clean_logo: document.getElementById('pipeCleanChkLogo') ? document.getElementById('pipeCleanChkLogo').checked : false,
+                    clean_title: document.getElementById('pipeCleanChkTitle') ? document.getElementById('pipeCleanChkTitle').checked : false
+                },
+                tts_options: {
+                    engine: 'edge',
+                    voice: document.getElementById('pipeVoiceSelect') ? document.getElementById('pipeVoiceSelect').value : 'vi-VN-NamMinhNeural',
+                    align_mode: document.getElementById('pipeAlignModeSelect') ? document.getElementById('pipeAlignModeSelect').value : 'smart_sync',
+                    margin: 60,
+                    max_speed: 1.45
+                },
+                burn_options: {
+                    audio_mode: document.getElementById('pipeAudioModeSelect') ? document.getElementById('pipeAudioModeSelect').value : 'keep_original',
+                    bgm_volume: 0.8
+                }
+            };
+
+            // Ngay lập tức hiện thanh tiến trình để người dùng thấy hệ thống đã phản hồi
+            showSection('progressSection');
+            hideSection('resultSection');
+            if (document.getElementById('progressFill')) document.getElementById('progressFill').style.width = '3%';
+            if (document.getElementById('progressPercent')) document.getElementById('progressPercent').textContent = '3%';
+            if (document.getElementById('progressText')) document.getElementById('progressText').textContent = 'Đang kết nối tới máy chủ...';
+
+            if (pipeSourceType === 'upload') {
+                if (!pipeSelectedFile) {
+                    throw new Error('Vui lòng chọn file video từ máy tính trước.');
+                }
+                if (btn) btn.innerHTML = '<span>⏳ Đang tải file lên máy chủ...</span>';
+
+                if (pipeSelectedFile.size <= 50 * 1024 * 1024) {
+                    const fd = new FormData();
+                    fd.append('file', pipeSelectedFile);
+                    fd.append('payload', JSON.stringify(payload));
+                    const resp = await fetch('/api/pipeline/run', {
+                        method: 'POST',
+                        body: fd
+                    });
+                    const data = await resp.json();
+                    if (!resp.ok || data.error) throw new Error(data.error || 'Khởi chạy thất bại');
+                    pipelineJobId = data.job_id;
+                    currentJobId = data.job_id;
+                } else {
+                    selectedFile = pipeSelectedFile;
+                    const uploadJob = await uploadFileChunked(pipeSelectedFile, 'pipeline', {}, (pct, loaded, total, speed) => {
+                        if (btn) btn.innerHTML = `<span>⏳ Đang tải lên: ${pct}% (${loaded}/${total}MB - ${speed}MB/s)...</span>`;
+                        if (document.getElementById('progressFill')) document.getElementById('progressFill').style.width = `${Math.round(pct * 0.2)}%`;
+                        if (document.getElementById('progressPercent')) document.getElementById('progressPercent').textContent = `${pct}%`;
+                        if (document.getElementById('progressText')) document.getElementById('progressText').textContent = `Đang tải video: ${loaded}/${total}MB (${speed}MB/s)...`;
+                    });
+                    if (!uploadJob || !uploadJob.job_id) {
+                        throw new Error('Upload phân đoạn thất bại.');
+                    }
+                    payload.job_id = uploadJob.job_id;
+                    payload.video_path = uploadJob.video_path;
+
+                    const resp = await fetch('/api/pipeline/run', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await resp.json();
+                    if (!resp.ok || data.error) throw new Error(data.error || 'Khởi chạy thất bại');
+                    pipelineJobId = data.job_id;
+                    currentJobId = data.job_id;
+                }
+            } else {
+                if (!url) {
+                    throw new Error('Vui lòng nhập hoặc dán link video Douyin.');
+                }
+                const resp = await fetch('/api/pipeline/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await resp.json();
+                if (!resp.ok || data.error) throw new Error(data.error || 'Khởi chạy thất bại');
+                pipelineJobId = data.job_id;
+                currentJobId = data.job_id;
+            }
+
+            if (btn) btn.innerHTML = '<span>⏳ 5% - Đang khởi chạy quy trình...</span>';
+            startPollingPipeline(pipelineJobId);
+
+        } catch (err) {
+            alert('Lỗi khởi chạy pipeline: ' + err.message);
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<span>🚀 BẮT ĐẦU CHẠY QUY TRÌNH STUDIO (START PIPELINE)</span>';
+            }
+        }
+    }
+
+    function startPollingPipeline(jobId) {
+        if (pipelinePollInterval) clearInterval(pipelinePollInterval);
+        pipelinePollInterval = setInterval(async () => {
+            try {
+                const resp = await fetch('/api/status/' + jobId);
+                if (!resp.ok) return;
+                const job = await resp.json();
+
+                updatePipelineProgressUI(job);
+
+                if (job.status === 'awaiting_review') {
+                    const targetLang = document.getElementById('pipeTargetLang').value;
+                    const srtObj = (job.srt_files && job.srt_files[targetLang]) || (job.srt_files && job.srt_files['vi']) || {};
+                    const srtPreview = srtObj.preview || '';
+                    document.getElementById('reviewBox').style.display = 'block';
+                    document.getElementById('reviewSrtTextarea').value = srtPreview;
+                } else {
+                    document.getElementById('reviewBox').style.display = 'none';
+                }
+
+                if (job.status === 'done') {
+                    clearInterval(pipelinePollInterval);
+                    onPipelineFinished(job);
+                } else if (job.status === 'error') {
+                    clearInterval(pipelinePollInterval);
+                    document.getElementById('progressText').textContent = '❌ ' + (job.message || 'Lỗi xử lý');
+                    document.getElementById('progressPercent').textContent = '!';
+                    document.getElementById('btnRunPipeline').disabled = false;
+                    document.getElementById('btnRunPipeline').innerHTML = '<span>🚀 BẮT ĐẦU CHẠY QUY TRÌNH STUDIO (START PIPELINE)</span>';
+                }
+            } catch (e) {
+                console.error('Polling error:', e);
+            }
+        }, 1500);
+    }
+
+    function updatePipelineProgressUI(job) {
+        const btn = document.getElementById('btnRunPipeline');
+        if (btn) {
+            if (job.status === 'processing' || job.status === 'queued') {
+                btn.disabled = true;
+                btn.innerHTML = `<span>⏳ ${job.progress || 0}% - ${job.message || 'Đang xử lý...'}</span>`;
+            } else if (job.status === 'awaiting_review') {
+                btn.disabled = true;
+                btn.innerHTML = '<span>⏸️ Đang chờ bạn duyệt phụ đề bên dưới...</span>';
+            }
+        }
+
+        const pFill = document.getElementById('progressFill');
+        const pPercent = document.getElementById('progressPercent');
+        const pText = document.getElementById('progressText');
+        const pDetail = document.getElementById('progressDetail');
+
+        if (pFill) pFill.style.width = (job.progress || 0) + '%';
+        if (pPercent) pPercent.textContent = (job.progress || 0) + '%';
+        if (pText) pText.textContent = job.message || 'Đang xử lý...';
+        if (pDetail) pDetail.textContent = `Mã tiến trình: ${job.job_id || ''} • Bước: ${job.active_step || 'Đang chạy'}`;
+
+        const step = job.active_step || '';
+        const s1 = document.getElementById('stepNode1');
+        const s2 = document.getElementById('stepNode2');
+        const s3 = document.getElementById('stepNode3');
+        const s4 = document.getElementById('stepNode4');
+        const s5 = document.getElementById('stepNode5');
+
+        [s1, s2, s3, s4, s5].forEach(n => { if (n) n.classList.remove('active', 'done'); });
+
+        if (step === 'step_1_download') { if (s1) s1.classList.add('active'); }
+        else if (step === 'step_2_subtitles') { if (s1) s1.classList.add('done'); if (s2) s2.classList.add('active'); }
+        else if (step === 'step_3_clean') { if (s1) s1.classList.add('done'); if (s2) s2.classList.add('done'); if (s3) s3.classList.add('active'); }
+        else if (step === 'step_4_tts') { if (s1) s1.classList.add('done'); if (s2) s2.classList.add('done'); if (s4) s4.classList.add('active'); }
+        else if (step === 'step_5_burn') { if (s1) s1.classList.add('done'); if (s2) s2.classList.add('done'); if (s4) s4.classList.add('done'); if (s5) s5.classList.add('active'); }
+        else if (step === 'completed' || job.status === 'done') {
+            [s1, s2, s3, s4, s5].forEach(n => { if (n) n.classList.add('done'); });
+        }
+    }
+
+    async function confirmAndContinuePipeline() {
+        if (!pipelineJobId) return;
+        const updatedSrt = document.getElementById('reviewSrtTextarea').value;
+        try {
+            const resp = await fetch('/api/pipeline/continue/' + pipelineJobId, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ updated_srt: updatedSrt })
+            });
+            const data = await resp.json();
+            if (data.error) throw new Error(data.error);
+            document.getElementById('reviewBox').style.display = 'none';
+        } catch (e) {
+            alert('Lỗi tiếp tục: ' + e.message);
+        }
+    }
+
+    
+    function renderSrtTabs(job) {
+        const srtCard = document.querySelector('.card-srt');
+        const tabContainer = document.getElementById('srtTabs');
+        const previewContainer = document.getElementById('srtPreview');
+        if (!tabContainer || !previewContainer) return;
+
+        const srtFiles = job.srt_files || {};
+        const langs = Object.keys(srtFiles);
+
+        if (langs.length === 0) {
+            if (srtCard) srtCard.style.display = 'none';
+            return;
+        }
+        if (srtCard) srtCard.style.display = 'block';
+
+        tabContainer.innerHTML = '';
+        langs.forEach((lang, idx) => {
+            const info = srtFiles[lang];
+            const btn = document.createElement('button');
+            btn.className = 'srt-tab' + (idx === 0 ? ' active' : '');
+            btn.textContent = (info.flag || '📄') + ' ' + (info.lang_name || lang.toUpperCase());
+            btn.onclick = () => {
+                document.querySelectorAll('#srtTabs .srt-tab').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                previewContainer.textContent = info.preview || 'Chưa có bản xem trước';
+            };
+            tabContainer.appendChild(btn);
+        });
+
+        const firstLang = langs[0];
+        previewContainer.textContent = srtFiles[firstLang].preview || 'Chưa có bản xem trước';
+    }
+
+    function onPipelineFinished(job) {
+        hideSection('progressSection');
+        showSection('resultSection');
+        document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth' });
+
+        document.getElementById('btnRunPipeline').disabled = false;
+        document.getElementById('btnRunPipeline').innerHTML = '<span>🚀 BẮT ĐẦU CHẠY QUY TRÌNH STUDIO (START PIPELINE)</span>';
+
+        const dlSrc = document.getElementById('dlSourceVideo');
+        const dlZh = document.getElementById('dlZhSrt');
+        const dlTarget = document.getElementById('dlTargetSrt');
+        const dlClean = document.getElementById('dlCleanVideo');
+        const dlTts = document.getElementById('dlTtsAudio');
+        const dlFinal = document.getElementById('dlFinalVideo');
+
+        if (job.video_file && job.video_file.path) {
+            dlSrc.style.display = 'inline-flex';
+            dlSrc.href = '/api/download-video/' + job.job_id;
+        }
+        if (job.srt_files && job.srt_files.zh) {
+            dlZh.style.display = 'inline-flex';
+            dlZh.href = '/api/download/' + job.job_id + '/zh';
+        }
+        const targetLang = document.getElementById('pipeTargetLang').value;
+        if (job.srt_files && (job.srt_files[targetLang] || job.srt_files.vi)) {
+            const tLang = job.srt_files[targetLang] ? targetLang : 'vi';
+            dlTarget.style.display = 'inline-flex';
+            dlTarget.href = '/api/download/' + job.job_id + '/' + tLang;
+            dlTarget.textContent = '📝 Tải Phụ Đề Đã Dịch (' + tLang.toUpperCase() + ')';
+        }
+        if (job.clean_video || job.burn_clean) {
+            dlClean.style.display = 'inline-flex';
+            dlClean.href = '/api/download-burned-video/' + job.job_id + '/clean';
+        }
+        if (job['tts_' + targetLang] || job.tts_vi) {
+            const tLang = job['tts_' + targetLang] ? targetLang : 'vi';
+            dlTts.style.display = 'inline-flex';
+            dlTts.href = '/api/download-audio/' + job.job_id + '/' + tLang;
+        }
+        if (job['burn_' + targetLang] || job.burn_vi) {
+            const tLang = job['burn_' + targetLang] ? targetLang : 'vi';
+            dlFinal.style.display = 'inline-flex';
+            dlFinal.href = '/api/download-burned-video/' + job.job_id + '/' + tLang;
+        }
+
+        renderSrtTabs(job);
+    }
+
+    function switchToolboxTab(tabId) {
+        document.querySelectorAll('#cardToolboxView .toolbox-tab-btn').forEach((b, idx) => {
+            const tabs = ['tool_dy', 'tool_sub', 'tool_clean', 'tool_srttts', 'tool_burn'];
+            b.classList.toggle('active', tabs[idx] === tabId);
+        });
+        document.getElementById('toolPaneDy').style.display = (tabId === 'tool_dy') ? 'block' : 'none';
+        document.getElementById('toolPaneSub').style.display = (tabId === 'tool_sub') ? 'block' : 'none';
+        document.getElementById('toolPaneClean').style.display = (tabId === 'tool_clean') ? 'block' : 'none';
+        document.getElementById('toolPaneSrtTts').style.display = (tabId === 'tool_srttts') ? 'block' : 'none';
+        document.getElementById('toolPaneBurn').style.display = (tabId === 'tool_burn') ? 'block' : 'none';
+    }
+
+    function pasteToolDyUrl() {
+        navigator.clipboard.readText().then(text => {
+            document.getElementById('toolDyInput').value = text.trim();
+        }).catch(() => { document.getElementById('toolDyInput').focus(); });
+    }
+
+    async function runToolDownloadDouyin() {
+        const url = document.getElementById('toolDyInput').value.trim();
+        if (!url) { alert('Vui lòng dán link video Douyin.'); return; }
+        document.getElementById('pipeUrlInput').value = url;
+        applyPipelinePreset('custom');
+        document.getElementById('chkStep1').checked = true;
+        document.getElementById('chkStep2').checked = false;
+        document.getElementById('chkStep3').checked = false;
+        document.getElementById('chkStep4').checked = false;
+        document.getElementById('chkStep5').checked = false;
+        for (let i = 1; i <= 5; i++) updateStepState(i);
+        switchMainMode('pipeline');
+        runStudioPipeline();
+    }
+
+    function onToolSubFileSelected(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        toolSubSelectedFile = file;
+        const info = document.getElementById('toolSubFileInfo');
+        info.style.display = 'block';
+        info.textContent = '🎥 ' + file.name + ' (' + (file.size/1048576).toFixed(1) + 'MB)';
+    }
+
+    function runToolExtractSub() {
+        if (!toolSubSelectedFile) { alert('Vui lòng chọn video cần trích sub.'); return; }
+        pipeSelectedFile = toolSubSelectedFile;
+        setPipelineSource('upload');
+        applyPipelinePreset('custom');
+        document.getElementById('chkStep1').checked = false;
+        document.getElementById('chkStep2').checked = true;
+        document.getElementById('chkStep3').checked = false;
+        document.getElementById('chkStep4').checked = false;
+        document.getElementById('chkStep5').checked = false;
+        for (let i = 1; i <= 5; i++) updateStepState(i);
+        switchMainMode('pipeline');
+        runStudioPipeline();
+    }
+
+    function onToolCleanFileSelected(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        toolCleanSelectedFile = file;
+        const info = document.getElementById('toolCleanFileInfo');
+        info.style.display = 'block';
+        info.textContent = '🎥 ' + file.name + ' (' + (file.size/1048576).toFixed(1) + 'MB)';
+    }
+
+    function runToolCleanVideo() {
+        if (!toolCleanSelectedFile) { alert('Vui lòng chọn video cần xóa chữ.'); return; }
+        pipeSelectedFile = toolCleanSelectedFile;
+        setPipelineSource('upload');
+        applyPipelinePreset('custom');
+        document.getElementById('chkStep1').checked = false;
+        document.getElementById('chkStep2').checked = false;
+        document.getElementById('chkStep3').checked = true;
+        document.getElementById('chkStep4').checked = false;
+        document.getElementById('chkStep5').checked = false;
+        for (let i = 1; i <= 5; i++) updateStepState(i);
+        switchMainMode('pipeline');
+        runStudioPipeline();
+    }
+
+    async function runToolBurnSub() {
+        const vInput = document.getElementById('toolBurnVideoInput');
+        const sInput = document.getElementById('toolBurnSrtInput');
+        const vFile = vInput ? vInput.files[0] : null;
+        const sFile = sInput ? sInput.files[0] : null;
+
+        if (!vFile) { alert('Vui lòng chọn file video.'); return; }
+        if (!sFile) { alert('Vui lòng chọn file phụ đề .SRT.'); return; }
+
+        let srtText = await sFile.text();
+        pipeSelectedFile = vFile;
+        setPipelineSource('upload');
+        applyPipelinePreset('custom');
+        document.getElementById('chkStep1').checked = false;
+        document.getElementById('chkStep2').checked = false;
+        document.getElementById('chkStep3').checked = false;
+        document.getElementById('chkStep4').checked = false;
+        document.getElementById('chkStep5').checked = true;
+        for (let i = 1; i <= 5; i++) updateStepState(i);
+
+        switchMainMode('pipeline');
+
+        const btn = document.getElementById('btnRunPipeline');
+        btn.disabled = true;
+        btn.innerHTML = '<span>⏳ Đang tải file video & in phụ đề...</span>';
+
+        const payload = {
+            source_type: 'upload',
+            steps: { download: false, extract_sub: false, clean_video: false, tts: false, burn_sub: true },
+            sub_options: { target_lang: 'vi' },
+            target_srt_content: srtText,
+            clean_options: { region_mode: 'auto', engine: 'opencv' },
+            tts_options: {},
+            burn_options: { audio_mode: 'keep_original', render_mode: 'inpaint_burn' }
+        };
+
+        try {
+            if (vFile.size <= 50 * 1024 * 1024) {
+                const fd = new FormData();
+                fd.append('file', vFile);
+                fd.append('payload', JSON.stringify(payload));
+                const resp = await fetch('/api/pipeline/run', { method: 'POST', body: fd });
+                const data = await resp.json();
+                if (!resp.ok || data.error) throw new Error(data.error || 'Lỗi in sub');
+                pipelineJobId = data.job_id;
+                currentJobId = data.job_id;
+            } else {
+                selectedFile = vFile;
+                const uploadJob = await uploadFileChunked(vFile, 'pipeline', {}, (pct, loaded, total, speed) => {
+                    btn.innerHTML = `<span>⏳ Đang tải lên: ${pct}% (${loaded}/${total}MB)...</span>`;
+                });
+                payload.job_id = uploadJob.job_id;
+                payload.video_path = uploadJob.video_path;
+                const resp = await fetch('/api/pipeline/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await resp.json();
+                if (!resp.ok || data.error) throw new Error(data.error || 'Lỗi in sub');
+                pipelineJobId = data.job_id;
+                currentJobId = data.job_id;
+            }
+
+            document.getElementById('progressSection').style.display = 'block';
+            document.getElementById('resultSection').style.display = 'none';
+            document.getElementById('progressSection').scrollIntoView({ behavior: 'smooth' });
+            startPollingPipeline(pipelineJobId);
+        } catch (err) {
+            alert('Lỗi: ' + err.message);
+            btn.disabled = false;
+            btn.innerHTML = '<span>🚀 BẮT ĐẦU CHẠY QUY TRÌNH STUDIO (START PIPELINE)</span>';
+        }
+    }
+
+    function cancelCurrentJob() {
+        if (pipelineJobId) {
+            stopJob();
+            if (pipelinePollInterval) clearInterval(pipelinePollInterval);
+            document.getElementById('progressText').textContent = '🛑 Đã dừng xử lý.';
+        }
+    }
+
+
         function escapeHtml(value) {
             return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
         }
@@ -1108,7 +1965,7 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
         function setTranslationMode(mode) {
             translationMode = mode;
             localStorage.setItem('preferred_translation_mode', mode);
-            const movieBtn = document.getElementById('modeBtnMovie');
+            const movieBtn = document.getElementById('modeBtnMovie'); if (!movieBtn) return;
             const drivingBtn = document.getElementById('modeBtnDriving');
             const badge = document.getElementById('currentModeBadge');
             
@@ -1260,19 +2117,21 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
 
 // --- Drag & Drop ---
         const zone = document.getElementById('uploadZone');
-        zone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            zone.classList.add('dragover');
-        });
-        zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
-        zone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            zone.classList.remove('dragover');
-            const files = e.dataTransfer.files;
-            if (files.length > 0) handleFile(files[0]);
-        });
+        if (zone) {
+            zone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                zone.classList.add('dragover');
+            });
+            zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+            zone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                zone.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) handleFile(files[0]);
+            });
+        }
 
-        document.getElementById('fileInput').addEventListener('change', (e) => {
+        const _fi = document.getElementById('fileInput'); if (_fi) _fi.addEventListener('change', (e) => {
             if (e.target.files.length > 0) handleFile(e.target.files[0]);
         });
 
@@ -1488,6 +2347,10 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
             const cleanLogo = document.getElementById('burnChkCleanLogo') ? document.getElementById('burnChkCleanLogo').checked : false;
             const burnNewSub = document.getElementById('burnChkBurnSub') ? document.getElementById('burnChkBurnSub').checked : true;
 
+            const regionMode = document.getElementById('burnSubRegionMode') ? document.getElementById('burnSubRegionMode').value : 'auto';
+            const targetSubRegion = (regionMode === 'manual') ? subRegion : undefined;
+            const targetExtraRegions = (regionMode === 'manual') ? extraRegions : undefined;
+
             try {
                 const resp = await fetch(`/api/burnsub/${currentJobId}/${lang}`, {
                     method: 'POST',
@@ -1495,6 +2358,8 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
                     body: JSON.stringify({
                         render_mode: renderMode,
                         inpaint_engine: 'opencv',
+                        sub_region: targetSubRegion,
+                        extra_regions: targetExtraRegions,
                         bgm_mode: bgmMode,
                         bgm_volume: bgmVol,
                         translate_title: translateTitle,
@@ -1911,6 +2776,18 @@ function uploadWithProgress(url, formData, onProgress) {
                     const srtCard = document.querySelector('.card-srt');
                     if (srtCard) srtCard.style.display = 'block';
                 }
+
+            // Tự động kích hoạt nút tải video nếu auto_burn đã hoàn thành
+            const firstLangKey = Object.keys(data.srt_files || {})[0] || 'vi';
+            const autoBurnInfo = data.burned_video || data['burn_' + firstLangKey];
+            if (autoBurnInfo && autoBurnInfo.status === 'done') {
+                const resultRow = document.getElementById('burnStudioResultRow');
+                const statusText = document.getElementById('burnStudioStatusText');
+                const dlBtn = document.getElementById('btnDownloadBurnStudio');
+                if (resultRow) resultRow.style.display = 'flex';
+                if (dlBtn) dlBtn.href = `/api/download-burned-video/${currentJobId}/${firstLangKey}`;
+                if (statusText) statusText.textContent = `✅ Video in đè phụ đề (${firstLangKey.toUpperCase()}) đã sẵn sàng! (Âm thanh gốc 100%)`;
+            }
 
             if (data.trimmed_seconds && data.trimmed_seconds > 0) {
                 document.getElementById('trimmedBadgeRow').style.display = 'block';
@@ -2382,7 +3259,7 @@ function uploadWithProgress(url, formData, onProgress) {
         // Drag handlers (supports both X and Y, resize from corners)
         function initRegionDrag() {
             const container = document.getElementById('regionContainer');
-
+            if (!container) return;
             container.addEventListener('mousedown', (e) => {
                 const img = document.getElementById('regionImg');
                 const rect = img.getBoundingClientRect();
@@ -2488,7 +3365,7 @@ function uploadWithProgress(url, formData, onProgress) {
         function setRenderMode(mode) {
             currentRenderMode = mode;
             localStorage.setItem('preferred_render_mode', mode);
-            const bBlur = document.getElementById('rmode_blur');
+            const bBlur = document.getElementById('rmode_blur'); if (!bBlur) return;
             const bClean = document.getElementById('rmode_clean');
             const bInpaint = document.getElementById('rmode_inpaint');
             const bPure = document.getElementById('rmode_pure');
@@ -2685,11 +3562,16 @@ function uploadWithProgress(url, formData, onProgress) {
         function switchInputMode(mode) {
             inputMode = mode;
             document.querySelectorAll('.input-tab').forEach((t, i) => {
-                t.classList.toggle('active', (i === 0 && mode === 'file') || (i === 1 && mode === 'url') || (i === 2 && mode === 'hardsub') || (i === 3 && mode === 'douyin'));
+                t.classList.toggle('active', (i === 0 && mode === 'file') || (i === 1 && mode === 'url') || (i === 2 && mode === 'hardsub') || (i === 3 && mode === 'srttts') || (i === 4 && mode === 'douyin'));
             });
             document.getElementById('panelFile').classList.toggle('active', mode === 'file');
             document.getElementById('panelUrl').classList.toggle('active', mode === 'url');
             document.getElementById('panelHardsub').classList.toggle('active', mode === 'hardsub');
+            const panelSrt = document.getElementById('panelSrtTts');
+            if (panelSrt) {
+                panelSrt.style.display = (mode === 'srttts') ? 'block' : 'none';
+                panelSrt.classList.toggle('active', mode === 'srttts');
+            }
             const panelDy = document.getElementById('panelDouyin');
             if (panelDy) {
                 panelDy.style.display = mode === 'douyin' ? 'block' : 'none';
@@ -2698,15 +3580,16 @@ function uploadWithProgress(url, formData, onProgress) {
 
             const singleCfg = document.getElementById('studioSingleConfig');
             if (singleCfg) {
-                singleCfg.style.display = (mode === 'douyin') ? 'none' : 'block';
+                singleCfg.style.display = (mode === 'douyin' || mode === 'srttts') ? 'none' : 'block';
             }
 
             const isHardsub = (mode === 'hardsub');
             const isDouyin = (mode === 'douyin');
+            const isSrtTts = (mode === 'srttts');
 
             const sBtn = document.getElementById('startBtn');
             const hsBtn = document.getElementById('startHardsubBtn');
-            if (sBtn) sBtn.style.display = (isHardsub || isDouyin) ? 'none' : 'block';
+            if (sBtn) sBtn.style.display = (isHardsub || isDouyin || isSrtTts) ? 'none' : 'block';
             if (hsBtn) hsBtn.style.display = isHardsub ? 'block' : 'none';
 
             if (mode === 'douyin') {
@@ -2731,8 +3614,8 @@ function uploadWithProgress(url, formData, onProgress) {
             }
         }
 
-        document.getElementById('urlInput').addEventListener('input', () => validateUrl());
-        document.getElementById('urlInput').addEventListener('paste', () => setTimeout(validateUrl, 100));
+        const _ui = document.getElementById('urlInput'); if (_ui) { _ui.addEventListener('input', () => validateUrl()); }
+        const _ui2 = document.getElementById('urlInput'); if (_ui2) { _ui2.addEventListener('paste', () => setTimeout(validateUrl, 100)); }
 
         function validateUrl() {
             const url = document.getElementById('urlInput').value.trim();
@@ -2797,10 +3680,11 @@ function uploadWithProgress(url, formData, onProgress) {
 
         // Check Gemini key status
         (async function checkGeminiKey() {
+            const status = document.getElementById('keyStatus');
+            if (!status) return;
             try {
                 const res = await fetch('/api/gemini/key');
                 const data = await res.json();
-                const status = document.getElementById('keyStatus');
                 if (data.has_key) {
                     status.textContent = '✅ API key đã được cấu hình an toàn';
                     status.className = 'key-status ok';
@@ -2811,7 +3695,7 @@ function uploadWithProgress(url, formData, onProgress) {
                     geminiKeyOk = false;
                 }
             } catch(e) {
-                document.getElementById('keyStatus').textContent = '❌ Không thể kiểm tra key';
+                if (status) status.textContent = '❌ Không thể kiểm tra key';
             }
         })();
 
@@ -2864,18 +3748,20 @@ function uploadWithProgress(url, formData, onProgress) {
         }
 
         // Hardsub file handling
-        document.getElementById('hardsubFileInput').addEventListener('change', (e) => {
+        const _hfi = document.getElementById('hardsubFileInput'); if (_hfi) _hfi.addEventListener('change', (e) => {
             if (e.target.files.length > 0) handleHardsubFile(e.target.files[0]);
         });
 
         const hsZone = document.getElementById('hardsubUploadZone');
-        hsZone.addEventListener('dragover', (e) => { e.preventDefault(); hsZone.classList.add('dragover'); });
-        hsZone.addEventListener('dragleave', () => hsZone.classList.remove('dragover'));
-        hsZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            hsZone.classList.remove('dragover');
-            if (e.dataTransfer.files.length > 0) handleHardsubFile(e.dataTransfer.files[0]);
-        });
+        if (hsZone) {
+            hsZone.addEventListener('dragover', (e) => { e.preventDefault(); hsZone.classList.add('dragover'); });
+            hsZone.addEventListener('dragleave', () => hsZone.classList.remove('dragover'));
+            hsZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                hsZone.classList.remove('dragover');
+                if (e.dataTransfer.files.length > 0) handleHardsubFile(e.dataTransfer.files[0]);
+            });
+        }
 
         function handleHardsubFile(file) {
             const validTypes = ['.mp4', '.mkv', '.avi', '.mov', '.webm'];
@@ -2935,11 +3821,20 @@ function uploadWithProgress(url, formData, onProgress) {
             document.getElementById('progressPercent').textContent = '0%';
             
             try {
+                const autoBurn = document.getElementById('hardsubAutoBurnChk') ? document.getElementById('hardsubAutoBurnChk').checked : false;
+                const burnRegionMode = document.getElementById('hardsubRegionModeSelect') ? document.getElementById('hardsubRegionModeSelect').value : 'auto';
+                const renderMode = document.getElementById('hardsubRenderModeSelect') ? document.getElementById('hardsubRenderModeSelect').value : 'inpaint_burn';
+
                 const data = await uploadFileSmart(
                     hardsubFile,
                     'hardsub',
                     {
                         gemini_model: document.getElementById('geminiModel').value,
+                        auto_burn: autoBurn,
+                        burn_region_mode: burnRegionMode,
+                        sub_region: (burnRegionMode === 'manual') ? subRegion : undefined,
+                        render_mode: renderMode,
+                        keep_original_audio: true,
                         translate_langs: [...selectedLangs],
                         translate_method: translateMethod,
                         translation_mode: translationMode,
@@ -2970,83 +3865,338 @@ function uploadWithProgress(url, formData, onProgress) {
                 btn.textContent = '🔍 Bắt đầu trích hardsub (Gemini)';
             }
         }
-    </script>
+    
+        // ── HARDSUB IN-PLACE TRANSLATE & BURN HELPERS ──
+        function toggleHardsubAutoBurnOptions() {
+            const chk = document.getElementById('hardsubAutoBurnChk');
+            const opts = document.getElementById('hardsubAutoBurnOptions');
+            if (opts) opts.style.display = chk && chk.checked ? 'grid' : 'none';
+            const box = document.getElementById('hardsubManualRegionBox');
+            if (box && (!chk || !chk.checked)) box.style.display = 'none';
+        }
 
+        function toggleHardsubManualRegion() {
+            const sel = document.getElementById('hardsubRegionModeSelect');
+            const box = document.getElementById('hardsubManualRegionBox');
+            if (box) box.style.display = (sel && sel.value === 'manual') ? 'block' : 'none';
+        }
 
-<!-- Multi-Region Selector Modal -->
-<div id="regionModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.85); z-index:9999; align-items:center; justify-content:center;">
-    <div style="background:var(--bg-card,#1a1a2e); border-radius:16px; padding:24px; max-width:500px; width:95%; box-shadow:0 20px 60px rgba(0,0,0,0.5); max-height:90vh; overflow-y:auto;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h3 id="regionModalTitle" style="margin:0; font-size:16px; color:#f97316;">🎬 Chọn chế độ xử lý video</h3>
-            <button onclick="closeRegionModal()" style="background:none; border:none; color:#999; font-size:20px; cursor:pointer;">✕</button>
-        </div>
-        <div style="display:flex; gap:6px; margin-bottom:10px; align-items:center;">
-            <select id="presetSelect" onchange="applyPreset(this.value)" style="flex:1; padding:6px 10px; border-radius:6px; border:1px solid #333; background:#111; color:#eee; font-size:12px;">
-                <option value="">-- Chọn preset --</option>
-            </select>
-            <button onclick="saveCurrentPreset()" style="padding:6px 10px; border-radius:6px; border:1px solid #8b5cf6; background:rgba(139,92,246,0.1); color:#8b5cf6; cursor:pointer; font-size:11px; white-space:nowrap;">💾 Lưu</button>
-        </div>
-        <p style="font-size:11px; color:#888; margin-bottom:8px;">Kéo để di chuyển vùng, kéo góc để thay đổi kích thước. Tối đa 3 vùng.</p>
-        <div id="regionList" style="display:flex; flex-direction:column; gap:4px; margin-bottom:10px;"></div>
-        <button onclick="addExtraRegion()" style="width:100%; padding:6px; border-radius:6px; border:1px dashed #3b82f6; background:transparent; color:#3b82f6; cursor:pointer; font-size:11px; margin-bottom:10px;">➕ Thêm vùng blur (logo, watermark...)</button>
-        <div style="text-align:center;">
-            <div id="regionContainer" style="position:relative; display:inline-block; max-width:100%; user-select:none; border-radius:8px; overflow:hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
-                <img id="regionImg" style="max-width:100%; max-height:40vh; display:block;" />
-            </div>
-        </div>
-        <div id="regionInfo" style="text-align:center; font-size:11px; color:#f97316; margin:8px 0;"></div>
-        <div style="margin:10px 0; padding:10px 12px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px;">
-            <div style="font-size:11px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">🎯 Chế độ xử lý theo yêu cầu:</div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-                <div id="rmode_clean" onclick="setRenderMode('clean')" style="padding:8px 4px; font-size:11px; text-align:center; border-radius:6px; cursor:pointer; background:var(--bg-secondary); border:1.5px solid var(--border); color:var(--text-muted);">
-                    🧹 <b>1. Chỉ xóa hardsub cũ</b><br><span style="font-size:10px; opacity:0.8;">Video sạch (Không in sub mới)</span>
-                </div>
-                <div id="rmode_inpaint" onclick="setRenderMode('inpaint_burn')" style="padding:8px 4px; font-size:11px; text-align:center; border-radius:6px; cursor:pointer; background:rgba(249,115,22,0.18); border:1.5px solid #f97316; color:#f97316; font-weight:600;">
-                    🌟 <b>Xóa cũ + In sub mới</b><br><span style="font-size:10px; opacity:0.8;">Inpaint AI + Sub sắc nét</span>
-                </div>
-                <div id="rmode_blur" onclick="setRenderMode('blur')" style="padding:8px 4px; font-size:11px; text-align:center; border-radius:6px; cursor:pointer; background:var(--bg-secondary); border:1.5px solid var(--border); color:var(--text-muted);">
-                    ⚡ <b>Che mờ + In sub mới</b><br><span style="font-size:10px; opacity:0.8;">Dynamic Blur viền mềm (Nhanh)</span>
-                </div>
-                <div id="rmode_pure" onclick="setRenderMode('pure_burn')" style="padding:8px 4px; font-size:11px; text-align:center; border-radius:6px; cursor:pointer; background:var(--bg-secondary); border:1.5px solid var(--border); color:var(--text-muted);">
-                    📝 <b>2. Chỉ burn sub mới</b><br><span style="font-size:10px; opacity:0.8;">In trực tiếp (Không xóa nền)</span>
-                </div>
-            </div>
-        </div>
-        <div style="margin:8px 0; padding:10px 12px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px; display:flex; flex-direction:column; gap:8px;">
-            <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-primary); cursor:pointer;">
-                <input type="checkbox" id="chkTranslateTitle" style="cursor:pointer;" checked>
-                <span>🏷️ Dịch &amp; thay thế tiêu đề trên video (Top Title Banner)</span>
-            </label>
-            <div style="display:flex; align-items:center; gap:8px;">
-                <span style="font-size:11px; color:var(--text-muted); white-space:nowrap;">🏷️ Watermark / Kênh:</span>
-                <input type="text" id="txtBrandName" placeholder="Tên kênh (tùy chọn)" style="flex:1; padding:5px 8px; border-radius:6px; border:1px solid var(--border); background:var(--bg-secondary); color:var(--text-primary); font-size:11px;">
-            </div>
-        </div>
-        <div style="margin:8px 0; padding:10px 12px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px; display:flex; flex-direction:column; gap:8px;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-size:12px; font-weight:600; color:var(--text-primary);">🎵 Nhạc nền gốc (BGM):</span>
-                <select id="bgmModeSelect" style="padding:4px 8px; border-radius:6px; border:1px solid var(--border); background:var(--bg-secondary); color:var(--text-primary); font-size:11px;">
-                    <option value="ai" selected>🌟 Tách nhạc nền AI (Demucs - Xóa sạch tiếng Trung)</option>
-                    <option value="none">🔇 Tắt âm gốc (Chỉ giữ giọng đọc mới)</option>
-                    <option value="duck">⚡ Giảm âm nhanh (Ducking - Giữ âm gốc, giảm âm khi nói)</option>
-                </select>
-            </div>
-            <div id="bgmVolumeRow" style="display:flex; align-items:center; gap:8px;">
-                <span style="font-size:11px; color:var(--text-muted); white-space:nowrap;">Âm lượng nhạc nền:</span>
-                <input type="range" id="bgmVolumeSlider" min="0.1" max="1.0" step="0.05" value="0.8" style="flex:1;" oninput="document.getElementById('bgmVolumeVal').textContent = Math.round(this.value * 100) + '%'">
-                <span id="bgmVolumeVal" style="font-size:11px; color:#f97316; font-weight:600; width:36px;">80%</span>
-            </div>
-        </div>
-        <div style="display:flex; gap:8px; margin-top:10px;">
-            <button onclick="doBurnSub('auto')" style="flex:1; padding:10px; border-radius:8px; border:1px solid #8b5cf6; background:rgba(139,92,246,0.1); color:#8b5cf6; cursor:pointer; font-size:13px; font-weight:600;">🔍 Auto (OCR)</button>
-            <button onclick="doBurnSub('manual')" style="flex:1; padding:10px; border-radius:8px; border:1px solid #f97316; background:rgba(249,115,22,0.15); color:#f97316; cursor:pointer; font-size:13px; font-weight:600;">✋ Dùng vùng đã chọn</button>
-        </div>
-    </div>
-</div>
+        function openHardsubPresetPicker() {
+            const choice = prompt("Chọn vị trí hardsub thủ công:\n1. Chân video chuẩn (Y: 86%, Cao: 9%)\n2. Giữa thấp (Y: 78%, Cao: 14%)\n3. Khung vuông 1:1 (Y: 80%, Cao: 12%)\nHoặc nhập số Y% (ví dụ: 85):", "1");
+            if (choice === "1") {
+                subRegion = { x_ratio: 0.08, y_ratio: 0.86, w_ratio: 0.84, h_ratio: 0.09 };
+            } else if (choice === "2") {
+                subRegion = { x_ratio: 0.08, y_ratio: 0.78, w_ratio: 0.84, h_ratio: 0.14 };
+            } else if (choice === "3") {
+                subRegion = { x_ratio: 0.05, y_ratio: 0.80, w_ratio: 0.90, h_ratio: 0.12 };
+            } else if (choice && !isNaN(parseFloat(choice))) {
+                const yr = parseFloat(choice);
+                subRegion = { x_ratio: 0.08, y_ratio: yr > 1 ? yr / 100 : yr, w_ratio: 0.84, h_ratio: 0.09 };
+            }
+            const desc = document.getElementById('hardsubManualRegionDesc');
+            if (desc) desc.textContent = `Vị trí thủ công: X: ${Math.round((subRegion.x_ratio||0)*100)}%, Y: ${Math.round((subRegion.y_ratio||0.86)*100)}%, Rộng: ${Math.round((subRegion.w_ratio||0.84)*100)}%, Cao: ${Math.round((subRegion.h_ratio||0.09)*100)}%`;
+            updateBurnRegionBadge();
+        }
 
+        function onBurnRegionModeChange() {
+            const mode = document.getElementById('burnSubRegionMode').value;
+            const btn = document.getElementById('btnOpenFineTune');
+            const badge = document.getElementById('burnManualRegionBadge');
+            if (mode === 'manual') {
+                if (btn) btn.style.display = 'inline-flex';
+                if (badge) badge.style.display = 'block';
+                updateBurnRegionBadge();
+            } else {
+                if (btn) btn.style.display = 'none';
+                if (badge) badge.style.display = 'none';
+            }
+        }
 
+        function updateBurnRegionBadge() {
+            const el = document.getElementById('burnManualRegionCoordText');
+            if (el && subRegion) {
+                const x = Math.round((subRegion.x_ratio || 0) * 100);
+                const y = Math.round((subRegion.y_ratio || 0.86) * 100);
+                const w = Math.round((subRegion.w_ratio || 0.84) * 100);
+                const h = Math.round((subRegion.h_ratio || 0.09) * 100);
+                el.textContent = `X: ${x}%, Y: ${y}%, Rộng: ${w}%, Cao: ${h}%`;
+            }
+        }
+
+        function runDirectHardsubTranslateBurn() {
+            const bgmSel = document.getElementById('burnBgmSelect');
+            if (bgmSel) bgmSel.value = 'orig_only';
+            if (document.getElementById('burnChkCleanHardsub')) document.getElementById('burnChkCleanHardsub').checked = true;
+            if (document.getElementById('burnChkBurnSub')) document.getElementById('burnChkBurnSub').checked = true;
+            runStudioBurnSub();
+        }
+
+        // ── SRT TO TTS JAVASCRIPT FUNCTIONS ──
+        let srtToTtsFile = null;
+        let srtToTtsContent = "";
+        let srtToTtsJobId = null;
+        let srtToTtsPollInterval = null;
+
+        function switchSrtInputMode(mode) {
+            const isFile = (mode === 'file');
+            document.getElementById('srtUploadBox').style.display = isFile ? 'block' : 'none';
+            document.getElementById('srtPasteBox').style.display = isFile ? 'none' : 'block';
+            document.getElementById('btnSrtModeUpload').style.borderColor = isFile ? '#10b981' : 'var(--border)';
+            document.getElementById('btnSrtModeUpload').style.color = isFile ? '#10b981' : 'var(--text-secondary)';
+            document.getElementById('btnSrtModeUpload').style.background = isFile ? 'rgba(16,185,129,0.08)' : 'none';
+            document.getElementById('btnSrtModePaste').style.borderColor = !isFile ? '#10b981' : 'var(--border)';
+            document.getElementById('btnSrtModePaste').style.color = !isFile ? '#10b981' : 'var(--text-secondary)';
+            document.getElementById('btnSrtModePaste').style.background = !isFile ? 'rgba(16,185,129,0.08)' : 'none';
+        }
+
+        function onSrtFileSelected(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            srtToTtsFile = file;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                srtToTtsContent = e.target.result;
+                updateSrtSummary(file.name);
+            };
+            reader.readAsText(file, 'utf-8');
+        }
+
+        function onSrtTextPasted() {
+            srtToTtsContent = document.getElementById('srtTextInput').value;
+            srtToTtsFile = null;
+            updateSrtSummary('Nội dung dán trực tiếp');
+        }
+
+        function updateSrtSummary(sourceName) {
+            const lines = srtToTtsContent.trim().split(/\r?\n\s*\r?\n+/);
+            const validBlocks = lines.filter(b => b.includes('-->')).length;
+            const badge = document.getElementById('srtSummaryBadge');
+            const textEl = document.getElementById('srtSummaryText');
+            const runBtn = document.getElementById('btnRunSrtTts');
+
+            if (validBlocks > 0) {
+                badge.style.display = 'flex';
+                textEl.textContent = '📊 Đã nạp: ' + sourceName + ' (' + validBlocks + ' câu phụ đề)';
+                runBtn.disabled = false;
+            } else {
+                badge.style.display = 'none';
+                runBtn.disabled = true;
+            }
+        }
+
+        function clearSrtInput() {
+            srtToTtsFile = null;
+            srtToTtsContent = "";
+            document.getElementById('srtFileInput').value = "";
+            document.getElementById('srtTextInput').value = "";
+            document.getElementById('srtSummaryBadge').style.display = 'none';
+            document.getElementById('btnRunSrtTts').disabled = true;
+            document.getElementById('srtTtsResultCard').style.display = 'none';
+        }
+
+        function updateSrtVoiceList() {
+            const lang = document.getElementById('srtTtsLang').value;
+            const engine = document.getElementById('srtTtsEngine').value;
+            const voiceSelect = document.getElementById('srtTtsVoice');
+            voiceSelect.innerHTML = '';
+
+            if (engine === 'edge') {
+                if (lang === 'vi') {
+                    voiceSelect.add(new Option('Nam chính (vi-VN-NamMinhNeural - Nam Minh)', 'vi-VN-NamMinhNeural'));
+                    voiceSelect.add(new Option('Nữ chính (vi-VN-HoaiMyNeural - Hoài My)', 'vi-VN-HoaiMyNeural'));
+                } else if (lang === 'en') {
+                    voiceSelect.add(new Option('🌟 Andrew (Nam chuẩn Mỹ tự nhiên - Copilot) [Khuyên dùng]', 'en-US-AndrewMultilingualNeural'));
+                    voiceSelect.add(new Option('🌟 Ava (Nữ chuẩn Mỹ biểu cảm - Copilot) [Khuyên dùng]', 'en-US-AvaMultilingualNeural'));
+                    voiceSelect.add(new Option('🎙️ Brian (Nam đời thường, review, podcast)', 'en-US-BrianMultilingualNeural'));
+                    voiceSelect.add(new Option('🎙️ Emma (Nữ trẻ trung, sinh động)', 'en-US-EmmaMultilingualNeural'));
+                    voiceSelect.add(new Option('🎬 Christopher (Nam trầm ấm, tài liệu)', 'en-US-ChristopherNeural'));
+                    voiceSelect.add(new Option('📻 Aria (Nữ phát thanh viên chuyên nghiệp)', 'en-US-AriaNeural'));
+                    voiceSelect.add(new Option('⚡ Guy (Nam nhiệt huyết)', 'en-US-GuyNeural'));
+                    voiceSelect.add(new Option('🌸 Jenny (Nữ dịu dàng)', 'en-US-JennyNeural'));
+                } else {
+                    voiceSelect.add(new Option('Pria Utama (id-ID-ArdiNeural)', 'id-ID-ArdiNeural'));
+                    voiceSelect.add(new Option('Wanita Utama (id-ID-GadisNeural)', 'id-ID-GadisNeural'));
+                }
+            } else {
+                voiceSelect.add(new Option('Charon (Nam trầm, cinematic)', 'Charon'));
+                voiceSelect.add(new Option('Kore (Nữ ấm áp, tự nhiên)', 'Kore'));
+                voiceSelect.add(new Option('Fenrir (Nam mạnh mẽ)', 'Fenrir'));
+                voiceSelect.add(new Option('Aoede (Nữ nhẹ nhàng)', 'Aoede'));
+            }
+        }
+
+        async function runSrtToTts() {
+            if (!srtToTtsContent.trim()) {
+                alert('Vui lòng chọn file .srt hoặc dán nội dung phụ đề');
+                return;
+            }
+
+            const runBtn = document.getElementById('btnRunSrtTts');
+            runBtn.disabled = true;
+
+            const progressCard = document.getElementById('srtTtsProgressCard');
+            const resultCard = document.getElementById('srtTtsResultCard');
+            progressCard.style.display = 'block';
+            resultCard.style.display = 'none';
+
+            document.getElementById('srtTtsProgressPercent').textContent = '5%';
+            document.getElementById('srtTtsProgressFill').style.width = '5%';
+            document.getElementById('srtTtsProgressText').textContent = 'Đang gửi yêu cầu...';
+            document.getElementById('srtTtsProgressMsg').textContent = 'Đang kết nối tới server...';
+
+            const payload = {
+                srt_content: srtToTtsContent,
+                lang: document.getElementById('srtTtsLang').value,
+                engine: document.getElementById('srtTtsEngine').value,
+                voice: document.getElementById('srtTtsVoice').value,
+                align_mode: document.getElementById('srtAlignMode').value,
+                safety_margin_ms: parseInt(document.getElementById('srtSafetyMargin').value) || 60,
+                max_speed_ratio: parseFloat(document.getElementById('srtMaxSpeed').value) || 1.65,
+            };
+
+            try {
+                const resp = await fetch('/api/srt-to-tts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const data = await resp.json();
+                if (!resp.ok || data.error) {
+                    alert('Lỗi: ' + (data.error || 'Không thể bắt đầu tạo TTS'));
+                    runBtn.disabled = false;
+                    progressCard.style.display = 'none';
+                    return;
+                }
+
+                srtToTtsJobId = data.job_id;
+                startSrtToTtsPolling(srtToTtsJobId);
+            } catch(e) {
+                alert('Lỗi kết nối: ' + e.message);
+                runBtn.disabled = false;
+                progressCard.style.display = 'none';
+            }
+        }
+
+        function startSrtToTtsPolling(jobId) {
+            if (srtToTtsPollInterval) clearInterval(srtToTtsPollInterval);
+
+            srtToTtsPollInterval = setInterval(async () => {
+                try {
+                    const resp = await fetch('/api/status/' + jobId);
+                    if (!resp.ok) return;
+                    const data = await resp.json();
+
+                    const prog = data.progress || 0;
+                    const msg = data.message || 'Đang xử lý...';
+                    document.getElementById('srtTtsProgressPercent').textContent = prog + '%';
+                    document.getElementById('srtTtsProgressFill').style.width = prog + '%';
+                    document.getElementById('srtTtsProgressText').textContent = msg;
+
+                    if (data.status === 'done' || (data.srt_to_tts_result && data.srt_to_tts_result.status === 'done')) {
+                        clearInterval(srtToTtsPollInterval);
+                        srtToTtsPollInterval = null;
+                        onSrtToTtsComplete(jobId, data);
+                    } else if (data.status === 'error') {
+                        clearInterval(srtToTtsPollInterval);
+                        srtToTtsPollInterval = null;
+                        alert('Có lỗi xảy ra: ' + (data.message || 'Lỗi không xác định'));
+                        document.getElementById('btnRunSrtTts').disabled = false;
+                        document.getElementById('srtTtsProgressCard').style.display = 'none';
+                    }
+                } catch(e) {
+                    console.warn('Lỗi polling status:', e);
+                }
+            }, 1000);
+        }
+
+        function onSrtToTtsComplete(jobId, jobData) {
+            document.getElementById('btnRunSrtTts').disabled = false;
+            document.getElementById('srtTtsProgressCard').style.display = 'none';
+            const resultCard = document.getElementById('srtTtsResultCard');
+            resultCard.style.display = 'block';
+
+            const res = jobData.srt_to_tts_result || {};
+            document.getElementById('resSrtSegCount').textContent = res.total_segments || jobData.total_segments || 0;
+            document.getElementById('resSrtSubDur').textContent = (res.sub_duration_s || 0) + 's';
+            document.getElementById('resSrtAudioDur').textContent = (res.audio_duration_s || 0) + 's';
+            document.getElementById('resSrtOverlap').textContent = '0%';
+            document.getElementById('resSrtAudioSize').textContent = res.audio_size ? (res.audio_size / 1048576).toFixed(1) + ' MB' : '';
+
+            const audioUrl = '/api/srt-to-tts/download/' + jobId + '/audio';
+            const srtUrl = '/api/srt-to-tts/download/' + jobId + '/srt';
+
+            const player = document.getElementById('srtTtsAudioPlayer');
+            player.src = audioUrl;
+
+            document.getElementById('btnDownloadSrtAudio').href = audioUrl;
+            document.getElementById('btnDownloadSrtAligned').href = srtUrl;
+
+            const tbody = document.getElementById('srtTimelineTableBody');
+            tbody.innerHTML = '';
+            const segs = res.segments || [];
+            segs.forEach(s => {
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = '1px solid rgba(255,255,255,0.03)';
+                const startOrig = msToTs(s.orig_start_ms);
+                const endOrig = msToTs(s.orig_end_ms);
+                const startAct = msToTs(s.actual_start_ms);
+                const endAct = msToTs(s.actual_end_ms);
+
+                tr.innerHTML = `
+                    <td style="padding:6px 8px; color:var(--text-muted); font-weight:600;">#${s.index}</td>
+                    <td style="padding:6px 8px; color:var(--text-secondary); font-family:monospace;">${startOrig} ➔ ${endOrig}</td>
+                    <td style="padding:6px 8px; color:#10b981; font-family:monospace; font-weight:600;">${startAct} ➔ ${endAct}</td>
+                    <td style="padding:6px 8px; color:var(--text-primary); max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${s.text}">
+                        ${s.speaker ? `<span style="color:#f59e0b; font-weight:700;">[${s.speaker}]</span> ` : ''}${s.text}
+                    </td>
+                    <td style="padding:6px 8px; color:${s.speed_factor > 1.2 ? '#f59e0b' : 'var(--text-secondary)'}; font-weight:600;">${s.speed_factor}x</td>
+                    <td style="padding:6px 8px;"><span style="background:rgba(16,185,129,0.15); color:#10b981; padding:2px 6px; border-radius:4px; font-size:10px; font-weight:600;">✓ 0% Overlap</span></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function msToTs(ms) {
+            if (!ms && ms !== 0) return '00:00,000';
+            const s = Math.floor(ms / 1000);
+            const m = Math.floor(s / 60);
+            const sec = s % 60;
+            const mill = ms % 1000;
+            return String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0') + ',' + String(mill).padStart(3,'0');
+        }
+
+        function toggleSrtTimelineTable() {
+            const box = document.getElementById('srtTimelineTableContainer');
+            const icon = document.getElementById('srtTimelineTableToggleIcon');
+            if (box.style.display === 'none') {
+                box.style.display = 'block';
+                icon.textContent = '▲';
+            } else {
+                box.style.display = 'none';
+                icon.textContent = '▼';
+            }
+        }
+
+        async function cancelSrtTts() {
+            if (srtToTtsJobId) {
+                try {
+                    await fetch('/api/stop/' + srtToTtsJobId, { method: 'POST' });
+                } catch(e) {}
+            }
+            if (srtToTtsPollInterval) clearInterval(srtToTtsPollInterval);
+            document.getElementById('srtTtsProgressCard').style.display = 'none';
+            document.getElementById('btnRunSrtTts').disabled = false;
+        }
+    
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const params = new URLSearchParams(window.location.search);
+            const tab = params.get('tab') || params.get('mode');
+            if (tab === 'srttts' || tab === 'srt-to-tts') {
+                switchInputMode('srttts');
+            }
+        });
+
+</script>
 </body>
 </html>
-
-
-

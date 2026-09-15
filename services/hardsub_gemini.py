@@ -100,7 +100,12 @@ def create_gemini_proxy_video(video_path: str, job_id: str, force: bool = False)
     ]
 
     t_start = time.time()
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    from config import acquire_gpu_slot
+    if DEVICE == "cuda":
+        with acquire_gpu_slot():
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    else:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     if proc.returncode == 0 and Path(proxy_path).exists() and Path(proxy_path).stat().st_size > 0:
         proxy_size = Path(proxy_path).stat().st_size
         elapsed = time.time() - t_start
@@ -335,10 +340,51 @@ def hardsub_worker(job: dict) -> None:
                     srt_files[lang] = {"error": str(exc), "lang_name": LANGUAGES[lang]["name"], "flag": LANGUAGES[lang]["flag"]}
 
         job["srt_files"] = srt_files
+
+        # Tự động in đè phụ đề dịch lên vị trí hardsub cũ (giữ nguyên âm thanh gốc) nếu được chọn
+        if job.get("auto_burn"):
+            target_langs = [l for l in translate_langs if l in srt_files and "path" in srt_files[l]]
+            burn_lang = target_langs[0] if target_langs else ("zh" if "zh" in srt_files else None)
+            if burn_lang:
+                from services.burn_sub import burn_sub_video
+                job["status"] = "burning_sub"
+                job["progress"] = 85
+                lang_name = LANGUAGES.get(burn_lang, {}).get("name", burn_lang)
+                job["message"] = f"🎬 Đang in đè phụ đề {lang_name} lên vị trí hardsub cũ (Giữ âm thanh gốc)..."
+                burn_srt = Path(srt_files[burn_lang]["path"]).read_text(encoding="utf-8")
+
+                sub_reg = job.get("sub_region") if str(job.get("burn_region_mode", "auto")).lower() == "manual" else None
+                r_mode = str(job.get("render_mode", "inpaint_burn")).lower()
+                if r_mode not in ("inpaint_burn", "blur"):
+                    r_mode = "inpaint_burn"
+
+                try:
+                    burn_res = burn_sub_video(
+                        job_id=job_id,
+                        lang=burn_lang,
+                        srt_content=burn_srt,
+                        sub_region=sub_reg,
+                        render_mode=r_mode,
+                        inpaint_engine="opencv",
+                        clean_hardsub=True,
+                        clean_logo=bool(job.get("clean_logo", False)),
+                        clean_title=bool(job.get("translate_title", False)),
+                        translate_title=bool(job.get("translate_title", False)),
+                        title_lang=burn_lang,
+                        burn_new_sub=True,
+                        keep_original_audio=bool(job.get("keep_original_audio", True)),
+                        bgm_mode="orig_only",
+                    )
+                    if isinstance(burn_res, dict):
+                        job[f"burn_{burn_lang}"] = burn_res
+                        job["burned_video"] = burn_res
+                except Exception as b_err:
+                    print(f"[HARDSUB AUTO-BURN] Lỗi in đè sub: {b_err}")
+
         job["status"] = "done"
         job["progress"] = 100
         job["total_time"] = round(time.time() - started, 1)
-        job["message"] = "Hoàn tất!"
+        job["message"] = "Hoàn tất!" if not job.get("auto_burn") else "Hoàn tất trích xuất và in đè phụ đề!"
     except Exception as exc:
         traceback.print_exc()
         job["status"] = "error"

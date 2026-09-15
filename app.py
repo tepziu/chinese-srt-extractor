@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Chinese SRT Extractor & Translator web entry point."""
 
 from flask import Flask, jsonify

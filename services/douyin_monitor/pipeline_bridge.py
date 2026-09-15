@@ -1,4 +1,4 @@
-﻿"""
+"""
 pipeline_bridge.py — Automatic Studio Pipeline Execution & Telegram Delivery.
 Bridges newly downloaded Douyin videos into the complete translation & dubbing workflow.
 """

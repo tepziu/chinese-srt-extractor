@@ -1,4 +1,4 @@
-﻿"""
+"""
 services/douyin_monitor — Automated Douyin Channel Monitoring & Pipeline Dispatcher.
 """
 

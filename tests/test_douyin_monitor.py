@@ -1,4 +1,4 @@
-﻿"""
+"""
 test_douyin_monitor.py — Unit & Integration tests for Douyin Monitor & All-in-One Studio integration.
 """
 

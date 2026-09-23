@@ -25,7 +25,7 @@ if SPIDER_DIR not in sys.path and os.path.exists(SPIDER_DIR):
 _auth = None
 
 
-def get_douyin_auth(force_refresh_uifid: bool = True):
+def get_douyin_auth(force_refresh_uifid: bool = False):
     """Lazy initialize Douyin authentication using local .env credentials."""
     global _auth
     if _auth is None:
@@ -37,13 +37,15 @@ def get_douyin_auth(force_refresh_uifid: bool = True):
                 env_file = Path(SPIDER_DIR) / ".env"
 
             _auth = load_env(env_path=str(env_file), bootstrap_creator=False)
-            _auth.cookie["UIFID"] = secrets.token_hex(192)
+            if not _auth.cookie.get("UIFID"):
+                _auth.cookie["UIFID"] = secrets.token_hex(192)
             print(f"[DouyinCrawler] Auth initialized successfully ({len(_auth.cookie)} cookie keys)")
         except Exception as exc:
             print(f"[DouyinCrawler] Error initializing Douyin auth: {exc}")
             _auth = None
     elif force_refresh_uifid and _auth:
-        _auth.cookie["UIFID"] = secrets.token_hex(192)
+        if not _auth.cookie.get("UIFID"):
+                _auth.cookie["UIFID"] = secrets.token_hex(192)
 
     return _auth
 
@@ -135,7 +137,7 @@ def fetch_channel_videos(sec_uid: str, max_count: int = 18) -> list[dict]:
     if not sec_uid:
         return []
 
-    auth = get_douyin_auth(force_refresh_uifid=True)
+    auth = get_douyin_auth(force_refresh_uifid=False)
     if not auth:
         return []
 
@@ -146,26 +148,34 @@ def fetch_channel_videos(sec_uid: str, max_count: int = 18) -> list[dict]:
         print(f"[DouyinCrawler] Import error: {imp_err}")
         return []
 
-    for attempt in range(3):
-        try:
-            auth.cookie["UIFID"] = secrets.token_hex(192)
-            res = DouyinAPI.get_user_work_info(auth, user_url, "0")
-            aweme_list = res.get("aweme_list", []) if isinstance(res, dict) else []
-            if aweme_list:
-                works = [w for w in aweme_list if w.get("aweme_type") in [0, 4, 51, 53, 55, 68] or "video" in w]
-                if not works:
-                    works = aweme_list
-                sorted_works = sorted(works, key=lambda x: x.get("create_time", 0), reverse=True)
-                return sorted_works[:max_count]
-            time.sleep(1.5)
-        except Exception as exc:
-            if attempt < 2:
-                time.sleep(2)
-                continue
-            print(f"[DouyinCrawler] Error fetching works for {sec_uid[:20]}: {exc}")
-            return []
-
-    return []
+    works = {}
+    cursor = '0'
+    seen_cursors = set()
+    for _page in range(20):
+        if cursor in seen_cursors:
+            break
+        seen_cursors.add(cursor)
+        res = None
+        for attempt in range(3):
+            try:
+                # UIFID is part of the authenticated browser identity. Reusing the
+                # configured value avoids invalidating signatures and triggering Argus 403.
+                res = DouyinAPI.get_user_work_info(auth, user_url, cursor)
+                if not isinstance(res, dict):
+                    raise RuntimeError('Phản hồi Douyin không hợp lệ')
+                break
+            except Exception:
+                if attempt == 2:
+                    raise
+                time.sleep(1.5 * (attempt + 1))
+        for work in res.get('aweme_list', []):
+            if work.get('aweme_id') and ('video' in work or work.get('aweme_type') in [0, 4, 51, 53, 55, 68]):
+                works[str(work['aweme_id'])] = work
+        if len(works) >= max_count or not res.get('has_more'):
+            break
+        cursor = str(res.get('max_cursor', cursor))
+        time.sleep(0.5)
+    return sorted(works.values(), key=lambda w: w.get('create_time', 0), reverse=True)[:max_count]
 
 
 def download_master_video(work: dict, dest_dir: Path) -> str | None:

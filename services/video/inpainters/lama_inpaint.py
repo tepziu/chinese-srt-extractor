@@ -22,6 +22,7 @@ class LamaInpainter(BaseInpainter):
     def __init__(self, model_path: str | Path | None = None, providers: list[str] | None = None):
         self.model_path = Path(model_path) if model_path else MODEL_PATH
         self.session = None
+        self.fallback_count = 0
         self._fallback = OpenCVInpainter(method="telea")
 
         if self.model_path.exists():
@@ -78,6 +79,7 @@ class LamaInpainter(BaseInpainter):
             return image.copy()
 
         if self.session is None:
+            self.fallback_count += 1
             return self._fallback.inpaint(image, mask)
 
         try:
@@ -114,5 +116,6 @@ class LamaInpainter(BaseInpainter):
                 return self._inpaint_single_patch(image, mask)
 
         except Exception as exc:
+            self.fallback_count += 1
             print(f"LaMa inference error ({exc}), falling back to OpenCV")
             return self._fallback.inpaint(image, mask)

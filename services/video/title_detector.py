@@ -9,7 +9,7 @@ import re
 import cv2
 import numpy as np
 
-from config import AI_DEFAULT_MODEL, AI_TRANSLATE_CONFIG, LANGUAGES
+from config import AI_DEFAULT_MODEL, AI_TRANSLATE_CONFIG, LANGUAGES, acquire_gpu_slot
 
 
 def detect_top_title(
@@ -58,7 +58,8 @@ def detect_top_title(
             continue
 
         top_crop = frame[crop_top:crop_bottom, :]
-        results = reader.readtext(top_crop)
+        with acquire_gpu_slot():
+            results = reader.readtext(top_crop)
 
         for bbox, text, conf in results:
             clean = text.strip()

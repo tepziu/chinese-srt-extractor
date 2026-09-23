@@ -1,11 +1,9 @@
 @echo off
 chcp 65001 >nul
-title Chinese SRT Extractor - Telegram Bot
 cd /d "%~dp0"
 set PYTHONIOENCODING=utf-8
-if exist "venv\Scripts\python.exe" (
-    venv\Scripts\python.exe bot.py
-) else (
-    python bot.py
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\services.ps1" -Action start -Service bot
+if errorlevel 1 (
+    pause
+    exit /b 1
 )
-pause

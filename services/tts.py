@@ -212,6 +212,11 @@ def generate_omnivoice_audio(job_id: str, lang: str, segments: list, total: int,
     if not DEFAULT_CLONE_AUDIO or not DEFAULT_CLONE_AUDIO.exists():
         raise RuntimeError("Chưa cấu hình file reference audio cho OmniVoice")
 
+    import hashlib
+    identity = [segments, lang, str(DEFAULT_CLONE_AUDIO), DEFAULT_CLONE_AUDIO.stat().st_size,
+                DEFAULT_CLONE_AUDIO.stat().st_mtime_ns, DEFAULT_CLONE_TEXT, 'omnivoice-1.1']
+    temp_dir = temp_dir / hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()[:24]
+    temp_dir.mkdir(parents=True, exist_ok=True)
     input_path = temp_dir / "omnivoice_input.json"
     input_path.write_text(json.dumps({
         "segments": [segment[2] for segment in segments],
@@ -229,8 +234,11 @@ def generate_omnivoice_audio(job_id: str, lang: str, segments: list, total: int,
         text=True,
     )
     jobs[job_id]["_tts_process"] = process
+    started = time.monotonic()
     try:
         while process.poll() is None:
+            if time.monotonic() - started > 3600:
+                raise TimeoutError('OmniVoice vượt thời gian xử lý 1 giờ')
             if _cancelled(job_id):
                 process.terminate()
                 raise RuntimeError("Đã hủy TTS (Stop)")
@@ -245,6 +253,8 @@ def generate_omnivoice_audio(job_id: str, lang: str, segments: list, total: int,
             raise RuntimeError(f"OmniVoice: {result.get('message', 'unknown error')}")
         return [str(path) if path.exists() else None for path in [temp_dir / f"seg_{i:04d}.wav" for i in range(total)]]
     finally:
+        from services.media_process import stop_process
+        stop_process(process)
         jobs.get(job_id, {}).pop("_tts_process", None)
 
 
@@ -286,86 +296,21 @@ def generate_gemini_tts_audio(
     return paths
 
 
-def generate_tts_audio(
-    job_id: str,
-    lang: str,
-    srt_content: str,
-    engine: str = "edge",
-    options: dict | None = None,
-    speaker_voices: dict | None = None,
-):
-    segments = parse_srt_timing(srt_content)
-    if not segments:
-        raise RuntimeError("Không tìm thấy phụ đề để tạo audio")
-    if lang not in LANGUAGES:
-        raise ValueError(f"Ngôn ngữ không được hỗ trợ: {lang}")
-
-    tts_key = f"tts_{lang}"
-    jobs[job_id][tts_key] = {"status": "generating", "progress": 0, "message": f"Đang khởi tạo TTS ({engine})..."}
-    temp_dir = UPLOAD_FOLDER / job_id / f"tts_{lang}"
-    temp_dir.mkdir(parents=True, exist_ok=True)
+def generate_tts_audio(job_id, lang, srt_content, engine='edge', options=None, speaker_voices=None):
+    """Compatibility adapter: Web/Bot and CLI use the same alignment/cache engine."""
+    from services.srt_to_tts import process_srt_to_tts
+    opts = dict(options or {})
+    opts['speaker_voices'] = speaker_voices or opts.get('speaker_voices')
+    opts['segment_speakers'] = jobs[job_id].get('segment_speakers')
+    if jobs[job_id].get('duration'):
+        opts['target_duration_ms'] = int(jobs[job_id]['duration'] * 1000)
+    jobs[job_id][f'tts_{lang}'] = {'status':'generating','progress':0,'message':'Đang tạo giọng đọc...'}
     try:
-        if engine == "omnivoice":
-            segment_paths = generate_omnivoice_audio(job_id, lang, segments, len(segments), temp_dir, tts_key)
-        elif engine == "gemini":
-            segment_paths = generate_gemini_tts_audio(job_id, lang, segments, len(segments), temp_dir, tts_key, options, speaker_voices)
-        else:
-            segment_paths = generate_edge_tts_audio(job_id, lang, segments, len(segments), temp_dir, tts_key, speaker_voices)
-
-        _mark_progress(job_id, tts_key, 85, "Đang ghép audio theo timeline...")
-        video_duration_ms = int(float(jobs[job_id].get("duration", 0) or 0) * 1000)
-        sub_end_ms = segments[-1][1] if segments else 0
-        target_total_ms = max(video_duration_ms, sub_end_ms)
-        final_audio = AudioSegment.silent(duration=target_total_ms + 2000)
-        failures = []
-        last_audio_end = 0
-        safety_gap = 50
-
-        for index, (start_ms, end_ms, _text) in enumerate(segments):
-            source = segment_paths[index] if index < len(segment_paths) else None
-            if not source or not os.path.exists(source):
-                failures.append(index)
-                continue
-            try:
-                audio = AudioSegment.from_wav(source) if source.endswith(".wav") else AudioSegment.from_mp3(source)
-                actual_start = max(start_ms, last_audio_end + safety_gap) if last_audio_end > 0 and start_ms < last_audio_end + safety_gap else start_ms
-                next_start = segments[index + 1][0] if index + 1 < len(segments) else end_ms + 2000
-                max_slot = max(50, next_start - actual_start)
-                audio = _speed_audio_to_fit(source, audio, max_slot, safety_margin_ms=safety_gap)
-                if len(final_audio) < actual_start + len(audio) + 1000:
-                    final_audio = final_audio + AudioSegment.silent(duration=actual_start + len(audio) + 2000 - len(final_audio))
-                final_audio = final_audio.overlay(audio, position=actual_start)
-                last_audio_end = actual_start + len(audio)
-            except Exception as exc:
-                failures.append(index)
-                print(f"TTS overlay segment {index} failed: {exc}")
-
-        # Crop master audio strictly to match video/subtitle duration
-        final_duration_ms = max(target_total_ms, last_audio_end)
-        final_audio = final_audio[:final_duration_ms]
-
-        _mark_progress(job_id, tts_key, 95, "Đang export MP3...")
-        output_dir = OUTPUT_FOLDER / job_id
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"tts_{lang}.mp3"
-        final_audio.export(str(output_path), format="mp3", bitrate="192k")
-        size = output_path.stat().st_size
-        status = "partial" if failures else "done"
-        res_info = {
-            "status": status,
-            "progress": 100,
-            "message": f"Hoàn thành ({size / 1048576:.1f}MB)" + (f" • thiếu {len(failures)} đoạn" if failures else ""),
-            "path": str(output_path),
-            "filename": f"tts_{LANGUAGES[lang]['name']}_{job_id}.mp3",
-            "size": size,
-            "duration": round(len(final_audio) / 1000, 1),
-            "failed_segments": failures,
-            "total_segments": len(segments),
-        }
-        jobs[job_id][tts_key] = res_info
-        return res_info
+        process_srt_to_tts(srt_content, lang=lang, engine=engine, voice=opts.get('voice'),
+            options=opts, job_id=job_id, output_audio_path=OUTPUT_FOLDER/job_id/f'tts_{lang}.mp3', manage_status=False)
+        return jobs[job_id][f'tts_{lang}']
     except Exception as exc:
-        jobs[job_id][tts_key] = {"status": "error", "progress": 0, "message": f"Lỗi TTS: {exc}"}
+        jobs[job_id][f'tts_{lang}'] = {'status':'cancelled' if _cancelled(job_id) else 'error','message':str(exc)}
         raise
 
 

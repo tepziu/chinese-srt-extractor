@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import re
 import socket
@@ -11,7 +12,7 @@ import sys
 import shutil
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 from config import MAX_DOWNLOAD_BYTES, UPLOAD_FOLDER, jobs
 from services.whisper_engine import process_video
@@ -20,13 +21,73 @@ from services.whisper_engine import process_video
 CHINESE_DOMAINS = {"douyin.com", "iesdouyin.com", "xiaohongshu.com", "kuaishou.com", "v.douyin.com"}
 
 
+def clean_download_url(text: str) -> str:
+    """Trích xuất và chuẩn hóa URL hợp lệ từ chuỗi văn bản (ví dụ văn bản chia sẻ Douyin)."""
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    for part in raw.split():
+        if part.startswith(("http://", "https://")):
+            raw = part
+            break
+    else:
+        m = re.search(r"https?://\S+", raw)
+        if m:
+            raw = m.group(0)
+        elif re.match(r"^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(/.*)?$", raw):
+            raw = "https://" + raw
+    raw = raw.strip(" ,.?!;:\"'()[]<>")
+    return raw.strip()
+
+
+
+def _is_douyin_media_url(url: str, mime: str = "") -> bool:
+    lowered = str(url or "").lower()
+    if not lowered.startswith(("http://", "https://")):
+        return False
+    if "douyinstatic.com" in lowered or "media-audio-" in lowered:
+        return False
+    host_ok = any(host in lowered for host in ("zjcdn.com", "douyinvod.com", "bytecdn", "video/tos"))
+    return host_ok and ("video" in str(mime).lower() or "mime_type=video" in lowered or ".mp4" in lowered)
+
+
+def _parse_douyin_media_responses(performance_logs) -> list[str]:
+    urls = []
+    for item in performance_logs or []:
+        try:
+            message = json.loads(item["message"])["message"]
+            if message.get("method") != "Network.responseReceived":
+                continue
+            params = message.get("params") or {}
+            response = params.get("response") or {}
+            status = int(response.get("status") or 0)
+            url = response.get("url") or ""
+            mime = response.get("mimeType") or ""
+            if 200 <= status < 400 and _is_douyin_media_url(url, mime):
+                urls.append(url)
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return list(dict.fromkeys(urls))
+
+
+def _select_best_douyin_media_url(candidates) -> str:
+    def score(url):
+        try:
+            query = parse_qs(urlparse(url).query)
+            bitrate = int((query.get("br") or query.get("bt") or ["0"])[0])
+        except (TypeError, ValueError):
+            bitrate = 0
+        combined_bonus = 1 if "media-video-" not in url.lower() else 0
+        return bitrate, combined_bonus, len(url)
+    valid = [url for url in candidates if _is_douyin_media_url(url, "video/mp4")]
+    return max(valid, key=score) if valid else ""
+
 def validate_download_url(url: str) -> tuple[bool, str]:
     """Validate HTTP(S) URLs and reject private-network SSRF targets."""
     try:
-        clean_url = str(url).strip()
-        match = re.search(r"https?://[^\s<>\"'()]+", clean_url)
-        if match:
-            clean_url = match.group(0)
+        clean_url = clean_download_url(url)
+        if not clean_url:
+            return False, "URL không hợp lệ"
         parsed = urlparse(clean_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             return False, "URL không hợp lệ"
@@ -61,6 +122,23 @@ def download_chinese_video(job_id: str, url: str) -> str:
     """Download video from Chinese platforms using undetected-chromedriver."""
     import requests as _requests
 
+    url = clean_download_url(url)
+    if not url:
+        raise ValueError("URL tải video không hợp lệ")
+
+    if "v.douyin.com" in url:
+        try:
+            resp = _requests.get(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
+                allow_redirects=True,
+                timeout=10,
+            )
+            if resp.url and resp.url.startswith("http"):
+                url = resp.url
+        except Exception:
+            pass
+
     jobs[job_id]["message"] = "Đang mở trình duyệt ẩn..."
     jobs[job_id]["progress"] = 5
     driver = None
@@ -75,6 +153,10 @@ def download_chinese_video(job_id: str, url: str) -> str:
             opts.add_argument("--disable-dev-shm-usage")
             opts.add_argument("--lang=zh-CN")
             opts.add_argument("--disable-gpu")
+            opts.add_argument("--autoplay-policy=no-user-gesture-required")
+            opts.add_argument("--window-size=1280,900")
+            opts.page_load_strategy = "eager"
+            opts.set_capability("goog:loggingPrefs", {"performance": "ALL"})
             return opts
 
         try:
@@ -85,31 +167,69 @@ def download_chinese_video(job_id: str, url: str) -> str:
                 raise
             driver = uc.Chrome(options=get_options(), version_main=int(match.group(1)))
 
+        driver.set_page_load_timeout(35)
+        try:
+            driver.execute_cdp_cmd("Network.enable", {})
+        except Exception:
+            pass
         jobs[job_id]["message"] = "Đang truy cập trang video..."
         jobs[job_id]["progress"] = 8
-        driver.get(url)
-        time.sleep(8)
+        try:
+            driver.get(url)
+        except Exception as nav_err:
+            if "timeout" not in str(nav_err).lower():
+                raise
+        def capture_media(wait_seconds=22):
+            candidates = []
+            first_media_at = None
+            deadline = time.monotonic() + wait_seconds
+            while time.monotonic() < deadline:
+                if jobs.get(job_id, {}).get("cancel"):
+                    raise RuntimeError("Đã hủy (Stop)")
+                try:
+                    driver.execute_script("document.querySelector('video')?.play().catch(()=>{})")
+                    direct_sources = driver.execute_script(
+                        "return [...document.querySelectorAll('video')].map(v => v.currentSrc || v.src || '')"
+                    ) or []
+                    candidates.extend(src for src in direct_sources if _is_douyin_media_url(src, "video/mp4"))
+                    resources = driver.execute_script(
+                        "return performance.getEntriesByType('resource').map(e => e.name)"
+                    ) or []
+                    candidates.extend(src for src in resources if _is_douyin_media_url(src, "video/mp4"))
+                except Exception:
+                    pass
+                try:
+                    candidates.extend(_parse_douyin_media_responses(driver.get_log("performance")))
+                except Exception:
+                    pass
+                candidates = list(dict.fromkeys(candidates))
+                if candidates and first_media_at is None:
+                    first_media_at = time.monotonic()
+                if first_media_at is not None and time.monotonic() - first_media_at >= 1.5:
+                    break
+                time.sleep(0.5)
+            return candidates
+
+        media_candidates = capture_media()
+        for retry in range(2):
+            if media_candidates:
+                break
+            jobs[job_id]["message"] = f"Douyin chưa cấp stream, đang tải lại trang ({retry + 2}/3)..."
+            try:
+                driver.get(url + ("&" if "?" in url else "?") + f"studio_retry={int(time.time())}")
+            except Exception as nav_err:
+                if "timeout" not in str(nav_err).lower():
+                    continue
+            media_candidates = capture_media()
 
         title = (driver.title or "Video").split(" - ")[0].strip()[:80]
-        jobs[job_id]["original_name"] = title
-        jobs[job_id]["message"] = f"Đang tải: {title[:40]}..."
+        if title and "抖音精选" not in title:
+            jobs[job_id]["original_name"] = title
+        jobs[job_id]["message"] = f"Đang tải: {(jobs[job_id].get('original_name') or title or 'video')[:40]}..."
         jobs[job_id]["progress"] = 12
 
-        video_src = driver.execute_script(
-            """
-            const vids = document.querySelectorAll('video');
-            for (const v of vids) {
-                const src = v.src || v.currentSrc || '';
-                if (src && !src.startsWith('blob:')) return src;
-            }
-            for (const v of vids) {
-                const src = v.src || v.currentSrc || '';
-                if (src) return src;
-            }
-            return '';
-            """
-        )
-        if not video_src or video_src.startswith("blob:"):
+        video_src = _select_best_douyin_media_url(media_candidates)
+        if not video_src:
             render_data = driver.execute_script(
                 """
                 const el = document.getElementById('RENDER_DATA');
@@ -121,17 +241,17 @@ def download_chinese_video(job_id: str, url: str) -> str:
                     r'(https?://v[^"\s\\]+(?:zjcdn|douyinvod|bytecdn)[^"\s\\]*)',
                     render_data,
                 )
-                if urls:
-                    video_src = urls[0].replace("\\u002F", "/")
-        if not video_src or video_src.startswith("blob:"):
-            raise RuntimeError("Không thể trích xuất URL video từ trang web")
+                video_src = _select_best_douyin_media_url([url.replace("\\u002F", "/") for url in urls])
+        if not video_src:
+            raise RuntimeError("Chrome đã mở trang nhưng không bắt được luồng video CDN")
 
         jobs[job_id]["message"] = "Đang tải video..."
         jobs[job_id]["progress"] = 15
         cookies = {cookie["name"]: cookie["value"] for cookie in driver.get_cookies()}
         headers = {
             "User-Agent": driver.execute_script("return navigator.userAgent"),
-            "Referer": url,
+            "Referer": "https://www.douyin.com/",
+            "Accept-Encoding": "identity",
         }
         with _requests.get(
             video_src,
@@ -261,10 +381,7 @@ def download_douyin_master(job_id: str, url: str) -> str:
     from dy_apis.douyin_api import DouyinAPI, parse_aweme_id
 
     # 1. Trích xuất URL sạch nếu người dùng dán kèm cả đoạn văn bản chia sẻ của Douyin
-    clean_input = url.strip()
-    match = re.search(r'https?://[a-zA-Z0-9\.\-_/]+', clean_input)
-    if match:
-        clean_input = match.group(0)
+    clean_input = clean_download_url(url)
 
     # 2. Xử lý link rút gọn v.douyin.com -> redirect tới link video đầy đủ
     if "v.douyin.com" in clean_input:
@@ -275,7 +392,7 @@ def download_douyin_master(job_id: str, url: str) -> str:
         clean_input = r.url
 
     aweme_id, canonical_url = parse_aweme_id(clean_input)
-    auth = get_douyin_auth(force_refresh_uifid=True)
+    auth = get_douyin_auth(force_refresh_uifid=False)
     if not auth:
         raise RuntimeError("Không khởi tạo được Douyin Auth credentials từ .env")
 
@@ -311,6 +428,7 @@ def download_douyin_master(job_id: str, url: str) -> str:
 
 def download_from_url(job_id: str, url: str) -> str:
     """Download from URL, ưu tiên dùng Douyin Master API cho các link Douyin."""
+    url = clean_download_url(url)
     valid, error = validate_download_url(url)
     if not valid:
         raise ValueError(error)
@@ -324,10 +442,22 @@ def download_from_url(job_id: str, url: str) -> str:
         try:
             return download_douyin_master(job_id, url)
         except Exception as exc:
-            print(f"[Downloader] Douyin Master API thất bại ({exc}), chuyển sang cơ chế dự phòng...")
-            jobs[job_id]["message"] = "Douyin Master API gặp lỗi, chuyển sang cơ chế dự phòng..."
+            detail = str(exc)
+            fallback_enabled = os.getenv("DOUYIN_BROWSER_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"}
+            if fallback_enabled:
+                print(f"[Downloader] Douyin Master API thất bại ({detail}), dùng Chrome fallback theo cấu hình...")
+                jobs[job_id]["message"] = "Douyin Master API lỗi; đang dùng Chrome fallback theo cấu hình..."
+                return download_chinese_video(job_id, url)
+            auth_hint = (
+                "Douyin Master API bị từ chối xác thực (Argus/403). "
+                "Hãy cập nhật phiên đăng nhập trong .env: DY_COOKIES; và nếu bộ ký hiện tại sử dụng, "
+                "cập nhật đồng bộ DY_TICKET, DY_TS_SIGN, DY_CLIENT_CERT, DY_PRIVATE_KEY. "
+                "Sau đó restart Web/Bot và thử lại. Chrome fallback đang tắt để bảo toàn video gốc chất lượng cao."
+            )
+            jobs[job_id]["message"] = auth_hint
+            raise RuntimeError(auth_hint) from exc
 
-    # 2. Đối với các nền tảng khác hoặc khi Douyin Master API dự phòng
+    # 2. Đối với các nền tảng khác
     use_browser = any(domain in url.lower() for domain in CHINESE_DOMAINS)
     try:
         if use_browser:

@@ -1,0 +1,33 @@
+{
+  "method": "One run per case, synthetic 200ms tone every 1s; excludes providers and MP3 export; tracemalloc enabled; baseline is HEAD before this upgrade. Not an end-to-end benchmark.",
+  "results": [
+    {
+      "implementation": "baseline_HEAD",
+      "segments": 100,
+      "timeline_seconds": 99.5,
+      "elapsed_seconds": 0.2283,
+      "python_peak_mib": 20.52
+    },
+    {
+      "implementation": "current",
+      "segments": 100,
+      "timeline_seconds": 99.5,
+      "elapsed_seconds": 0.0266,
+      "python_peak_mib": 9.54
+    },
+    {
+      "implementation": "baseline_HEAD",
+      "segments": 400,
+      "timeline_seconds": 399.5,
+      "elapsed_seconds": 6.9509,
+      "python_peak_mib": 81.76
+    },
+    {
+      "implementation": "current",
+      "segments": 400,
+      "timeline_seconds": 399.5,
+      "elapsed_seconds": 0.1223,
+      "python_peak_mib": 37.01
+    }
+  ]
+}

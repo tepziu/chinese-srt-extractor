@@ -10,6 +10,8 @@ douyin_cookies.txt
 
 # Python
 venv/
+runtime/
+.pytest_cache/
 env/
 __pycache__/
 *.py[cod]

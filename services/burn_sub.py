@@ -10,7 +10,8 @@ import subprocess
 import time
 from pathlib import Path
 
-from config import DEVICE, MAX_BLUR_REGIONS, OUTPUT_FOLDER, jobs
+from config import DEVICE, MAX_BLUR_REGIONS, OUTPUT_FOLDER, jobs, safe_stem, acquire_gpu_slot
+from services.runtime_state import serial_task
 
 
 def create_feather_mask(
@@ -118,7 +119,8 @@ def detect_hardsub_region(video_path: str, job_id: str = None, srt_content: str 
         bottom_crop = frame[crop_start:crop_end, :]
 
         try:
-            results = reader.readtext(bottom_crop, paragraph=False)
+            with acquire_gpu_slot():
+                results = reader.readtext(bottom_crop, paragraph=False)
             frame_has_text = False
             for (bbox, text, conf) in results:
                 xs = [p[0] for p in bbox]
@@ -325,6 +327,28 @@ def build_timeline_enable_expression(intervals: list[tuple[float, float]]) -> st
     return "+".join(clauses)
 
 
+def _build_opaque_band_filter(vw: int, vh: int, region: dict, ass_escaped: str) -> str:
+    """Hide the complete subtitle band before burning the translated ASS file.
+
+    Unlike the interval-based blur path, this deliberately covers the whole
+    selected region for the entire video. It is the guaranteed-removal mode
+    for unattended batch processing; the trade-off is that it can cover some
+    background imagery behind the original hardsub.
+    """
+    rx = max(0, min(int(vw * region.get("x_ratio", 0.08)), vw - 4))
+    ry = max(0, min(int(vh * region.get("y_ratio", 0.86)), vh - 4))
+    rw = max(4, min(int(vw * region.get("w_ratio", 0.84)), vw - rx))
+    rh = max(4, min(int(vh * region.get("h_ratio", 0.09)), vh - ry))
+    rx -= rx % 2
+    ry -= ry % 2
+    rw = max(4, rw - (rw % 2))
+    rh = max(4, rh - (rh % 2))
+    return (
+        f"[0:v]drawbox=x={rx}:y={ry}:w={rw}:h={rh}:"
+        f"color=black@1.0:t=fill,ass='{ass_escaped}'[vout]"
+    )
+
+
 def _build_blur_filter(
     vw: int,
     vh: int,
@@ -400,6 +424,7 @@ def _build_blur_filter(
     return "".join(parts)
 
 
+@serial_task
 def burn_sub_video(
     job_id: str,
     lang: str,
@@ -582,7 +607,7 @@ def burn_sub_video(
         output_dir = OUTPUT_FOLDER / job_id
         output_dir.mkdir(parents=True, exist_ok=True)
         clean_tag = "clean" if render_mode == "clean" else f"{lang}_sub"
-        out_file = str(output_dir / f"{jobs[job_id].get('original_name', 'video')[:30]}_{clean_tag}.mp4")
+        out_file = str(output_dir / f"{safe_stem(jobs[job_id].get('original_name', 'video'), max_length=30)}_{clean_tag}.mp4")
 
         re_burn_ass = None
         if render_mode == "inpaint_burn":
@@ -598,7 +623,7 @@ def burn_sub_video(
         extra_inpaint = all_blur_regions[1:] if len(all_blur_regions) > 1 else None
 
         from services.video.clean_pipeline import clean_video_pipeline
-        return clean_video_pipeline(
+        clean_result = clean_video_pipeline(
             video_path=video_path,
             sub_region=sub_region,
             srt_content=srt_content,
@@ -610,6 +635,9 @@ def burn_sub_video(
             tts_audio_path=audio_to_mux if (has_tts and render_mode != "clean") else None,
             extra_regions=extra_inpaint,
         )
+        clean_result["sub_region"] = sub_region
+        clean_result["region_method"] = method
+        return clean_result
 
     # Output path
     output_dir = OUTPUT_FOLDER / job_id
@@ -723,7 +751,8 @@ def burn_sub_video(
     else:
         has_tts = bool(tts_path and os.path.exists(tts_path) and audio_to_mux)
 
-    # Generate feathered alpha masks for each region
+    # Generate feathered alpha masks for each region. The batch opaque mode
+    # intentionally skips masks and covers the full subtitle band instead.
     mask_files = []
     mask_args = []
     for i, region in enumerate(all_blur_regions):
@@ -737,13 +766,17 @@ def burn_sub_video(
         mask_args.extend(["-loop", "1", "-i", mask_path])
 
     mask_start_idx = 2 if has_tts else 1
-    intervals = extract_subtitle_intervals(srt_content)
-    timeline_enable = build_timeline_enable_expression(intervals)
-    filter_complex = _build_blur_filter(
-        vw, vh, all_blur_regions, ass_escaped,
-        mask_input_start=mask_start_idx,
-        timeline_enable=timeline_enable,
-    )
+    if render_mode == "opaque_band":
+        filter_complex = _build_opaque_band_filter(vw, vh, sub_region, ass_escaped)
+        mask_args = []
+    else:
+        intervals = extract_subtitle_intervals(srt_content)
+        timeline_enable = build_timeline_enable_expression(intervals)
+        filter_complex = _build_blur_filter(
+            vw, vh, all_blur_regions, ass_escaped,
+            mask_input_start=mask_start_idx,
+            timeline_enable=timeline_enable,
+        )
     if has_tts:
         filter_complex += ";[1:a]apad[aout]" 
 

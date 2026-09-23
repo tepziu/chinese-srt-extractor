@@ -1,0 +1,49 @@
+{
+  "gpu_timeout_enters_critical_section": true,
+  "cleanup_retains_job": {
+    "awaiting_review": false,
+    "generating": false,
+    "processing": true
+  },
+  "cancelled_job_with_required_missing_inputs": {
+    "status": "done",
+    "artifacts": {}
+  },
+  "partial_tts_pipeline_status": {
+    "parent": "done",
+    "tts": "partial"
+  },
+  "partial_ai_translation": {
+    "retained_valid_ai_line": false,
+    "google_calls": 2,
+    "segment_speakers": [
+      "M1",
+      "M1"
+    ]
+  },
+  "incomplete_chunk_resume": {
+    "finish_http": 400,
+    "retry_missing_chunk_http": 404
+  },
+  "pipeline_chunk_finish": {
+    "http": 200,
+    "declared_bytes": 8,
+    "actual_bytes": 5,
+    "worker_started": "process_video",
+    "response_has_video_path": false
+  },
+  "status_windows_path_escape": {
+    "http": 200,
+    "reads_fixture_outside_output_root": true
+  },
+  "dense_tts_timing": {
+    "input_valid": true,
+    "output_valid": false,
+    "first_start_ms": 60,
+    "first_end_ms": -40,
+    "reported_overlap_ms": 0
+  },
+  "invalid_numeric_option_http": 500,
+  "monitor_marks_failed_pipeline_downloaded": true,
+  "unsafe_burn_filename_example": "False"
+}

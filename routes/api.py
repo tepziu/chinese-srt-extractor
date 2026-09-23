@@ -13,7 +13,9 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from flask import Blueprint, request, jsonify, send_file, make_response
+from flask import Blueprint, request, jsonify, send_file as _send_file, make_response
+from services.runtime_state import valid_job_id, resolve_media_path, host_lock, public_data
+from services.pipeline_options import validate_tts_options
 
 from config import (
     parse_bool,
@@ -26,6 +28,7 @@ from config import (
     AI_TRANSLATE_MODELS, AI_DEFAULT_MODEL, SPEAKER_VOICE_MAPS, TTS_VOICES,
     get_gemini_api_key, set_gemini_api_key,
     TRANSLATION_MODES, DEFAULT_TRANSLATION_MODE,
+    BATCH_ALLOWED_ROOTS, BATCH_MAX_FILES,
 )
 from services.whisper_engine import process_video
 from services.tts import tts_worker
@@ -34,8 +37,48 @@ from services.google_tts import get_google_tts_health
 from services.burn_sub import burnsub_worker
 from services.downloader import download_from_url, process_url_video, validate_download_url
 from services.hardsub_gemini import hardsub_worker
+from services.job_runner import submit
+from services.batch_pipeline import (
+    BatchRunner,
+    create_batch_manifest,
+    load_batch_manifest,
+    recover_stale_batch,
+    run_batch,
+    scan_video_folder,
+    validate_batch_options,
+)
 
 api_bp = Blueprint("api", __name__)
+
+
+@api_bp.before_request
+def validate_request_boundary():
+    jid = (request.view_args or {}).get("job_id")
+    if jid is not None and not valid_job_id(jid):
+        return jsonify({"error": "job_id không hợp lệ"}), 400
+    if request.is_json and not isinstance(request.get_json(silent=True), dict):
+        return jsonify({"error": "Dữ liệu JSON phải là object"}), 400
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        origin = request.headers.get("Origin")
+        if origin and origin.rstrip("/") != request.host_url.rstrip("/"):
+            return jsonify({"error": "Origin không được phép"}), 403
+    if jid:
+        get_job(jid)
+
+
+@api_bp.errorhandler(ValueError)
+def invalid_option(error):
+    return jsonify({"error": str(error)}), 400
+
+
+@api_bp.errorhandler(TimeoutError)
+def resource_busy(error):
+    return jsonify({"error": str(error)}), 409
+
+
+def send_file(path, **kwargs):
+    path = resolve_media_path(path, UPLOAD_FOLDER, OUTPUT_FOLDER)
+    return _send_file(path, **kwargs)
 
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".webm"}
 
@@ -311,6 +354,26 @@ _chunk_lock = threading.RLock()
 _chunk_uploads: dict[str, dict[str, Any]] = {}
 
 
+def _save_chunk_session(session):
+    path = UPLOAD_FOLDER / session['job_id'] / 'upload-session.json'
+    data = public_data(session)
+    path.with_suffix('.tmp').write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+    path.with_suffix('.tmp').replace(path)
+
+
+def _load_chunk_session(job_id):
+    if not valid_job_id(job_id):
+        raise ValueError('job_id không hợp lệ')
+    path = UPLOAD_FOLDER / job_id / 'upload-session.json'
+    if path.is_file():
+        session = json.loads(path.read_text(encoding='utf-8'))
+        session['received_chunks'] = set(session['received_chunks'])
+        session['video_path'] = str(resolve_media_path(session['video_path'], UPLOAD_FOLDER))
+        _chunk_uploads[job_id] = session
+        return session
+    return _chunk_uploads.get(job_id)
+
+
 def _cleanup_expired_chunk_sessions():
     now = time.time()
     with _chunk_lock:
@@ -358,6 +421,13 @@ def upload_init():
     if total_chunks <= 0:
         total_chunks = max(1, (total_size + chunk_size - 1) // chunk_size) if total_size > 0 else 1
 
+    if total_size <= 0 or not 1 <= chunk_size <= 64 * 1024 * 1024:
+        return jsonify({'error': 'Dung lượng file phải dương; chunk tối đa 64 MiB'}), 400
+    if total_chunks != (total_size + chunk_size - 1) // chunk_size or total_chunks > 1000000:
+        return jsonify({'error': 'Số chunk không khớp dung lượng file'}), 400
+    if shutil.disk_usage(UPLOAD_FOLDER).free < total_size + 256 * 1024 * 1024:
+        return jsonify({'error': 'Không đủ dung lượng đĩa cho file upload'}), 507
+
     job_id = uuid.uuid4().hex[:12]
     job_dir = UPLOAD_FOLDER / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -380,6 +450,8 @@ def upload_init():
             "created_at": time.time(),
             "metadata": dict(data),
         }
+        _save_chunk_session(_chunk_uploads[job_id])
+    create_job(job_id, status='uploading', original_name=filename, video_path=str(video_path))
 
     return jsonify({
         "job_id": job_id,
@@ -396,8 +468,12 @@ def upload_chunk():
     if not job_id:
         return jsonify({"error": "Thiếu job_id"}), 400
 
-    with _chunk_lock:
-        session = _chunk_uploads.get(job_id)
+    with host_lock('upload-' + job_id, timeout=30):
+        return _receive_chunk(job_id)
+
+
+def _receive_chunk(job_id):
+    session = _load_chunk_session(job_id)
     if not session:
         return jsonify({"error": "Phiên upload không tồn tại hoặc đã hết hạn"}), 404
 
@@ -413,22 +489,41 @@ def upload_chunk():
         return jsonify({"error": "Thiếu dữ liệu chunk"}), 400
 
     chunk_file = request.files["chunk"]
-    chunk_bytes = chunk_file.read()
+    if session.get('finished_response'):
+        return jsonify({'error': 'Upload đã hoàn tất'}), 409
 
     chunk_size = session["chunk_size"]
     video_path = Path(session["video_path"])
     offset = chunk_index * chunk_size
 
+    temp_part = video_path.with_suffix('.chunk')
+    expected = min(chunk_size, session['total_size'] - offset)
     try:
-        with open(video_path, "r+b" if video_path.exists() else "wb") as f:
+        received = 0
+        with temp_part.open('wb') as part:
+            while True:
+                buf = chunk_file.stream.read(min(1024 * 1024, expected - received + 1))
+                if not buf:
+                    break
+                received += len(buf)
+                if received > expected:
+                    return jsonify({'error': 'Chunk vượt kích thước khai báo'}), 400
+                part.write(buf)
+        if received != expected:
+            return jsonify({'error': 'Chunk chưa đủ kích thước khai báo'}), 400
+        with video_path.open('r+b') as f, temp_part.open('rb') as part:
             f.seek(offset)
-            f.write(chunk_bytes)
+            shutil.copyfileobj(part, f, 1024 * 1024)
     except Exception as e:
         return jsonify({"error": f"Lỗi ghi chunk: {e}"}), 500
+    finally:
+        temp_part.unlink(missing_ok=True)
 
     with _chunk_lock:
         session["received_chunks"].add(chunk_index)
         received_count = len(session["received_chunks"])
+        session['last_activity'] = time.time()
+        _save_chunk_session(session)
 
     return jsonify({
         "job_id": job_id,
@@ -441,6 +536,22 @@ def upload_chunk():
 
 @api_bp.route("/api/upload/finish", methods=["POST"])
 def upload_finish():
+    data = request.get_json(silent=True) or request.form.to_dict()
+    jid = str(data.get('job_id', '')).strip()
+    if not valid_job_id(jid):
+        raise ValueError('job_id không hợp lệ')
+    with host_lock('upload-' + jid, timeout=60):
+        session = _load_chunk_session(jid)
+        if session and session.get('finished_response'):
+            return jsonify(session['finished_response'])
+        response = _finish_upload()
+        if not isinstance(response, tuple) and response.status_code == 200 and session:
+            session['finished_response'] = response.get_json()
+            _save_chunk_session(session)
+        return response
+
+
+def _finish_upload():
     """Kiểm tra toàn vẹn file sau upload phân đoạn và bắt đầu tiến trình xử lý."""
     data = request.get_json(silent=True) or request.form.to_dict()
     job_id = str(data.get("job_id", "")).strip()
@@ -448,7 +559,7 @@ def upload_finish():
         return jsonify({"error": "Thiếu job_id"}), 400
 
     with _chunk_lock:
-        session = _chunk_uploads.pop(job_id, None)
+        session = _load_chunk_session(job_id)
     if not session:
         return jsonify({"error": "Phiên upload không tồn tại hoặc đã hoàn tất"}), 404
 
@@ -460,7 +571,7 @@ def upload_finish():
         }), 400
 
     video_path = Path(session["video_path"])
-    if not video_path.exists() or (session["total_size"] > 0 and video_path.stat().st_size == 0):
+    if not video_path.exists() or video_path.stat().st_size != session["total_size"]:
         return jsonify({"error": "File sau khi ghép rỗng hoặc không hợp lệ"}), 400
 
     valid_media, media_error = _validate_media_path(video_path)
@@ -470,6 +581,10 @@ def upload_finish():
 
     meta = session.get("metadata", {})
     upload_type = meta.get("upload_type", "whisper")
+
+    if upload_type == 'pipeline':
+        create_job(job_id, status='uploaded', video_path=str(video_path), original_name=session['filename'], video_file=_video_info(str(video_path)))
+        return jsonify({'job_id': job_id, 'status': 'uploaded', 'video_path': str(video_path)})
 
     if upload_type == "hardsub":
         gemini_model = meta.get("gemini_model", GEMINI_DEFAULT_MODEL)
@@ -585,21 +700,25 @@ def upload_finish():
 def upload_cancel():
     data = request.get_json(silent=True) or request.form.to_dict()
     job_id = str(data.get("job_id", "")).strip()
+    if not valid_job_id(job_id):
+        raise ValueError('job_id không hợp lệ')
     if not job_id:
         return jsonify({"error": "Thiếu job_id"}), 400
 
-    with _chunk_lock:
-        session = _chunk_uploads.pop(job_id, None)
-
-    if session:
-        v_path = Path(session.get("video_path", ""))
-        v_path.unlink(missing_ok=True)
-        if v_path.parent.exists():
-            try:
-                shutil.rmtree(v_path.parent)
-            except Exception:
-                pass
-        return jsonify({"status": "cancelled", "job_id": job_id})
+    with host_lock('upload-' + job_id, timeout=5):
+        session = _load_chunk_session(job_id)
+        if session:
+            if session.get('finished_response'):
+                raise TimeoutError('Upload đã hoàn tất; dùng chức năng dừng job để hủy xử lý.')
+            target = (UPLOAD_FOLDER / job_id).resolve()
+            if target.parent != UPLOAD_FOLDER.resolve():
+                raise ValueError('Đường dẫn upload không hợp lệ')
+            shutil.rmtree(target, ignore_errors=False)
+            _chunk_uploads.pop(job_id, None)
+            job = get_job(job_id)
+            if job:
+                job.update(status='cancelled', cancel=True, message='Đã hủy upload')
+            return jsonify({"status": "cancelled", "job_id": job_id})
     return jsonify({"status": "not_found", "job_id": job_id})
 
 
@@ -611,7 +730,8 @@ def url_download():
     if not data or "url" not in data:
         return jsonify({"error": "Thiếu URL"}), 400
 
-    url = str(data["url"]).strip()
+    from services.downloader import clean_download_url
+    url = clean_download_url(data.get("url", ""))
     valid_url, url_error = validate_download_url(url)
     if not valid_url:
         return jsonify({"error": url_error}), 400
@@ -687,6 +807,51 @@ def url_download():
 
 # ── Job Status & Control ──────────────────────────────────────────────────
 
+def _declared_artifact_paths(job):
+    """Return output artifacts promised by a job, without treating source media as output."""
+    found = []
+    containers = [job.get('srt_files', {}), job.get('step_results', {})]
+    containers.extend(value for key, value in job.items()
+                      if isinstance(value, dict) and (key.startswith('tts_') or key.startswith('burn_')
+                                                     or key in {'clean_video', 'burned_video', 'aligned_srt'}))
+    def visit(value):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in {'path', 'audio_path', 'srt_path'} and isinstance(child, str):
+                    try:
+                        resolved = Path(child).resolve()
+                        if resolved.is_relative_to(OUTPUT_FOLDER.resolve()):
+                            found.append(resolved)
+                    except (OSError, ValueError):
+                        pass
+                else:
+                    visit(child)
+        elif isinstance(value, (list, tuple)):
+            for child in value:
+                visit(child)
+    for container in containers:
+        visit(container)
+    return list(dict.fromkeys(found))
+
+
+def _strip_missing_artifact_paths(value):
+    """Avoid returning broken download links while preserving status metadata."""
+    if isinstance(value, dict):
+        result = {key: _strip_missing_artifact_paths(child) for key, child in value.items()}
+        raw_path = value.get('path')
+        if isinstance(raw_path, str):
+            try:
+                path = Path(raw_path).resolve()
+                if path.is_relative_to(OUTPUT_FOLDER.resolve()) and not path.is_file():
+                    result.pop('path', None)
+                    result['artifact_missing'] = True
+            except (OSError, ValueError):
+                pass
+        return result
+    if isinstance(value, list):
+        return [_strip_missing_artifact_paths(item) for item in value]
+    return value
+
 @api_bp.route("/api/status/<job_id>")
 def get_status(job_id):
     job = get_job(job_id)
@@ -730,16 +895,17 @@ def get_status(job_id):
                         break
                 job = create_job(
                     job_id,
-                    status="done",
+                    status="interrupted",
                     progress=100,
-                    message="Hoàn thành!",
+                    message="Đã tìm thấy file cũ; chưa xác minh quy trình đã hoàn tất.",
+                    legacy_unverified=True,
                     segment_count=len(srt_files.get("zh", {}).get("preview", "").split("\n\n")),
                     srt_files=srt_files,
                     speakers=speakers,
                     video_file=video_file,
                 )
                 for tts_file in output_dir.glob("tts_*.mp3"):
-                    t_lang = tts_file.stem.replace("tts_", "")
+                    t_lang = tts_file.stem.removeprefix("tts_").removeprefix("aligned_")
                     job[f"tts_{t_lang}"] = {
                         "status": "done",
                         "progress": 100,
@@ -769,6 +935,13 @@ def get_status(job_id):
     if job is None:
         return jsonify({"error": "Job không tồn tại"}), 404
 
+    missing_artifacts = [path for path in _declared_artifact_paths(job) if not path.is_file()]
+    if missing_artifacts:
+        job['artifact_warnings'] = [path.name for path in missing_artifacts]
+        if job.get('status') == 'done':
+            job.update(status='partial', active_step='artifact_missing',
+                       message=f'Tác vụ từng hoàn tất nhưng hiện thiếu {len(missing_artifacts)} tệp kết quả; cần chạy lại hoặc khôi phục file.')
+
     if "speakers" not in job:
         speakers_file = OUTPUT_FOLDER / job_id / "speakers.json"
         if speakers_file.exists():
@@ -779,8 +952,9 @@ def get_status(job_id):
             except Exception:
                 pass
 
-    _HIDDEN_KEYS = {"_ffmpeg_process", "_download_process", "_tts_process", "_created_at", "gemini_api_key", "video_path"}
-    safe_data = {k: v for k, v in job.items() if k not in _HIDDEN_KEYS and not k.startswith("_")}
+    if hasattr(job, 'persist') and job.get('_owner_pid') == os.getpid():
+        job.persist()
+    safe_data = _strip_missing_artifact_paths(public_data(job))
     return jsonify(safe_data)
 
 
@@ -789,9 +963,13 @@ def stop_job(job_id):
     job = get_job(job_id)
     if job is None:
         return jsonify({"error": "Job không tồn tại"}), 404
-    job["cancel"] = True
+    # A remote cancel must not overwrite a newer worker snapshot.
+    jobs.store.cancel(job_id)
+    if job.get('_owner_pid') == os.getpid():
+        job["cancel"] = True
+    job.update(status='cancelled', message='Đã hủy công việc')
 
-    for process_key in ("_ffmpeg_process", "_download_process"):
+    for process_key in ("_ffmpeg_process", "_download_process", "_tts_process"):
         process = job.get(process_key)
         if process and process.poll() is None:
             try:
@@ -821,7 +999,7 @@ def download_srt(job_id, lang):
         return jsonify({"error": "Job không tồn tại"}), 404
 
     job = jobs[job_id]
-    if job["status"] != "done":
+    if job["status"] not in {"done", "partial", "awaiting_review", "interrupted", "processing"}:
         return jsonify({"error": "File chưa sẵn sàng"}), 400
 
     srt_files = job.get("srt_files", {})
@@ -1075,9 +1253,9 @@ def srt_to_tts_endpoint():
         voice = request.form.get("voice") or None
         options = {
             "align_mode": request.form.get("align_mode", "smart_sync"),
-            "safety_margin_ms": int(request.form.get("safety_margin_ms", 60)),
-            "max_speed_ratio": float(request.form.get("max_speed_ratio", 1.65)),
-            "target_duration_ms": int(request.form.get("target_duration_ms", 0)) if request.form.get("target_duration_ms") else None,
+            "safety_margin_ms": request.form.get("safety_margin_ms", 60),
+            "max_speed_ratio": request.form.get("max_speed_ratio", 1.65),
+            "target_duration_ms": request.form.get("target_duration_ms") or None,
         }
     else:
         data = request.get_json(silent=True) or {}
@@ -1087,14 +1265,17 @@ def srt_to_tts_endpoint():
         voice = data.get("voice") or None
         options = {
             "align_mode": data.get("align_mode", "smart_sync"),
-            "safety_margin_ms": int(data.get("safety_margin_ms", 60)),
-            "max_speed_ratio": float(data.get("max_speed_ratio", 1.65)),
-            "target_duration_ms": int(data.get("target_duration_ms", 0)) if data.get("target_duration_ms") else None,
+            "safety_margin_ms": data.get("safety_margin_ms", 60),
+            "max_speed_ratio": data.get("max_speed_ratio", 1.65),
+            "target_duration_ms": data.get("target_duration_ms") or None,
             "speaker_voices": data.get("speaker_voices"),
             "style_prompt": data.get("style_prompt"),
         }
 
-    if not srt_content.strip():
+    options = validate_tts_options(options)
+    if engine not in {'edge', 'gemini', 'omnivoice'}:
+        raise ValueError('Engine TTS không được hỗ trợ')
+    if not isinstance(srt_content, str) or not srt_content.strip():
         return jsonify({"error": "Vui lòng tải lên file .srt hoặc nhập nội dung phụ đề"}), 400
 
     try:
@@ -1571,7 +1752,8 @@ def start_hardsub():
 def start_hardsub_url():
     """Start hardsub extraction from URL video using Gemini API"""
     data = request.get_json(silent=True) or {}
-    url = str(data.get("url", "")).strip()
+    from services.downloader import clean_download_url
+    url = clean_download_url(data.get("url", ""))
     valid_url, url_error = validate_download_url(url)
     if not valid_url:
         return jsonify({"error": url_error}), 400
@@ -1789,7 +1971,7 @@ def get_pipeline_presets():
             "name": "🎬 1. Trọn gói Lồng tiếng & In Sub (Full Dub)",
             "desc": "Tải video Douyin -> Nhận diện & Dịch -> Tạo thuyết minh TTS -> In sub kèm Ducking hạ nhỏ tiếng gốc.",
             "steps": {"download": True, "extract_sub": True, "clean_video": False, "tts": True, "burn_sub": True},
-            "sub_options": {"engine": "gemini", "model": "gemini-3.8-flash-high", "target_lang": "vi", "style": "movie", "pause_for_review": False},
+            "sub_options": {"engine": "hybrid", "model": "gemini-3.8-flash-high", "target_lang": "vi", "style": "movie", "pause_for_review": False},
             "clean_options": {"region_mode": "auto", "engine": "opencv", "clean_hardsub": True},
             "tts_options": {"engine": "edge", "voice": "vi-VN-NamMinhNeural", "align_mode": "smart_sync", "margin": 60, "max_speed": 1.45},
             "burn_options": {"audio_mode": "tts_ducking", "render_mode": "inpaint_burn", "bgm_volume": 0.8}
@@ -1798,7 +1980,7 @@ def get_pipeline_presets():
             "name": "🇻🇳 2. Chỉ làm Vietsub (Giữ 100% âm thanh gốc)",
             "desc": "Tải video Douyin -> Nhận diện & Dịch -> In sub mới đè lên sub cũ, giữ nguyên toàn bộ âm thanh gốc.",
             "steps": {"download": True, "extract_sub": True, "clean_video": False, "tts": False, "burn_sub": True},
-            "sub_options": {"engine": "gemini", "model": "gemini-3.8-flash-high", "target_lang": "vi", "style": "movie", "pause_for_review": False},
+            "sub_options": {"engine": "hybrid", "model": "gemini-3.8-flash-high", "target_lang": "vi", "style": "movie", "pause_for_review": False},
             "clean_options": {"region_mode": "auto", "engine": "opencv", "clean_hardsub": True},
             "tts_options": {},
             "burn_options": {"audio_mode": "keep_original", "render_mode": "inpaint_burn", "bgm_volume": 1.0}
@@ -1807,7 +1989,7 @@ def get_pipeline_presets():
             "name": "🧹 3. Bộ dựng tự do (Xuất Video sạch chữ & File .SRT)",
             "desc": "Tải video Douyin -> Nhận diện & Dịch ra file .SRT -> Xóa sạch chữ trên video (Clean Plate) để tự dựng CapCut/Premiere.",
             "steps": {"download": True, "extract_sub": True, "clean_video": True, "tts": False, "burn_sub": False},
-            "sub_options": {"engine": "gemini", "model": "gemini-3.8-flash-high", "target_lang": "vi", "style": "movie", "pause_for_review": False},
+            "sub_options": {"engine": "hybrid", "model": "gemini-3.8-flash-high", "target_lang": "vi", "style": "movie", "pause_for_review": False},
             "clean_options": {"region_mode": "auto", "engine": "opencv", "clean_hardsub": True},
             "tts_options": {},
             "burn_options": {}
@@ -1819,7 +2001,9 @@ def get_pipeline_presets():
 def get_all_jobs():
     """Liệt kê danh sách tất cả các jobs đang có trên server."""
     active = {}
-    for jid, j in list(jobs.items()):
+    for jid, j in jobs.snapshots().items():
+        if j is None:
+            continue
         active[jid] = {
             "job_id": jid,
             "status": j.get("status"),
@@ -1830,6 +2014,249 @@ def get_all_jobs():
             "created_at": j.get("_created_at", 0),
         }
     return jsonify(active)
+
+
+@api_bp.route("/api/batch/region-preview", methods=["POST"])
+def api_batch_region_preview():
+    """Detect or preview the shared subtitle region on the first batch video."""
+    data = request.get_json(silent=True) or {}
+    folder_path = str(data.get("folder_path") or data.get("folder") or "").strip()
+    if not folder_path:
+        return jsonify({"error": "Chưa cung cấp folder_path"}), 400
+
+    mode = str(data.get("region_mode") or "auto").strip().lower()
+    option_payload = {
+        "region_mode": mode,
+        "sub_region": data.get("sub_region"),
+        "output_mode": "srt_and_video",
+    }
+    region_options = validate_batch_options(option_payload)
+    files = scan_video_folder(
+        folder_path,
+        recursive=parse_bool(data.get("recursive"), True),
+        extensions=data.get("extensions"),
+        allowed_roots=BATCH_ALLOWED_ROOTS,
+    )
+    if not files:
+        return jsonify({"error": "Không tìm thấy video hợp lệ trong thư mục"}), 400
+    video_path = files[0]
+
+    with host_lock("batch-region-preview", timeout=600):
+        if mode == "auto":
+            from services.burn_sub import detect_hardsub_region
+            detected = detect_hardsub_region(str(video_path), job_id=None, srt_content=None)
+            region_method = str(detected.get("method") or "auto")
+            region = validate_batch_options({
+                "region_mode": "manual",
+                "sub_region": detected,
+                "output_mode": "srt_and_video",
+            })["sub_region"]
+        else:
+            region = region_options["sub_region"]
+            region_method = "manual"
+
+        import cv2
+        cap = cv2.VideoCapture(str(video_path))
+        try:
+            if not cap.isOpened():
+                raise ValueError("Không đọc được video để tạo preview")
+            total_frames = max(1, int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))
+            target_frame = min(total_frames - 1, max(0, int(total_frames * 0.25)))
+            cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ok, frame = cap.read()
+            if not ok or frame is None:
+                raise ValueError("Không trích xuất được frame preview")
+        finally:
+            cap.release()
+
+        height, width = frame.shape[:2]
+        x = max(0, min(width - 1, int(width * region["x_ratio"])))
+        y = max(0, min(height - 1, int(height * region["y_ratio"])))
+        w = max(2, min(width - x, int(width * region["w_ratio"])))
+        h = max(2, min(height - y, int(height * region["h_ratio"])))
+        color = (40, 220, 40) if mode == "auto" else (0, 180, 255)
+        cv2.rectangle(frame, (x, y), (x + w - 1, y + h - 1), color, 3)
+        cv2.putText(
+            frame,
+            f"Subtitle region: {region_method}",
+            (max(4, x), max(22, y - 8)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            color,
+            2,
+            cv2.LINE_AA,
+        )
+        preview_id = uuid.uuid4().hex[:20]
+        preview_dir = OUTPUT_FOLDER / "batch_region_previews"
+        preview_dir.mkdir(parents=True, exist_ok=True)
+        preview_path = preview_dir / f"{preview_id}.jpg"
+        if not cv2.imwrite(str(preview_path), frame):
+            raise RuntimeError("Không ghi được ảnh preview")
+
+    return jsonify({
+        "video_name": video_path.name,
+        "video_path": str(video_path),
+        "region_mode": mode,
+        "region_method": region_method,
+        "region": region,
+        "preview_url": f"/api/batch/region-preview/file/{preview_id}",
+    })
+
+
+@api_bp.route("/api/batch/region-preview/file/<preview_id>", methods=["GET"])
+def api_batch_region_preview_file(preview_id):
+    if not re.fullmatch(r"[a-f0-9]{20}", str(preview_id or "")):
+        return jsonify({"error": "preview_id không hợp lệ"}), 400
+    preview_path = OUTPUT_FOLDER / "batch_region_previews" / f"{preview_id}.jpg"
+    if not preview_path.is_file():
+        return jsonify({"error": "Preview không tồn tại"}), 404
+    return send_file(preview_path, mimetype="image/jpeg", max_age=0)
+
+
+@api_bp.route("/api/batch/run", methods=["POST"])
+def api_batch_run():
+    """Start a resumable translation/render batch for a local video folder."""
+    data = request.get_json(silent=True) or {}
+    folder_path = str(data.get("folder_path") or data.get("folder") or "").strip()
+    if not folder_path:
+        return jsonify({"error": "Chưa cung cấp folder_path"}), 400
+
+    options = validate_batch_options(data)
+    files = scan_video_folder(
+        folder_path,
+        recursive=options["recursive"],
+        extensions=options["extensions"],
+        allowed_roots=BATCH_ALLOWED_ROOTS,
+    )
+    if not files:
+        return jsonify({"error": "Không tìm thấy video hợp lệ trong thư mục"}), 400
+    if len(files) > BATCH_MAX_FILES:
+        return jsonify({"error": f"Batch vượt giới hạn {BATCH_MAX_FILES} video"}), 400
+
+    batch_id = f"batch_{uuid.uuid4().hex[:10]}"
+    batch_dir = OUTPUT_FOLDER / "batches" / batch_id
+    manifest_path, manifest = create_batch_manifest(
+        batch_id,
+        Path(folder_path).expanduser().resolve(),
+        files,
+        batch_dir,
+        options,
+    )
+    create_job(
+        batch_id,
+        mode="batch",
+        original_name=Path(folder_path).name,
+        batch_id=batch_id,
+        batch_folder=str(Path(folder_path).expanduser().resolve()),
+        batch_manifest_path=str(manifest_path),
+        status="queued",
+        progress=0,
+        batch_counts=manifest["counts"],
+    )
+    try:
+        submit(run_batch, batch_id, str(manifest_path), options)
+    except Exception as exc:
+        manifest["status"] = "error"
+        manifest["error"] = str(exc)
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        return jsonify({"error": str(exc), "batch_id": batch_id}), 409
+    return jsonify({
+        "batch_id": batch_id,
+        "status": "queued",
+        "total_files": len(files),
+        "manifest_path": str(manifest_path),
+    }), 202
+
+
+@api_bp.route("/api/batch/<batch_id>", methods=["GET"])
+def api_batch_status(batch_id):
+    job = get_job(batch_id)
+    manifest_path = (job or {}).get("batch_manifest_path")
+    if not manifest_path:
+        manifest_path = str(OUTPUT_FOLDER / "batches" / batch_id / "manifest.json")
+    try:
+        manifest = recover_stale_batch(manifest_path, job)
+    except FileNotFoundError:
+        return jsonify({"error": "Không tìm thấy batch"}), 404
+    return jsonify(manifest)
+
+
+@api_bp.route("/api/batch/<batch_id>/stop", methods=["POST"])
+def api_batch_stop(batch_id):
+    job = get_job(batch_id)
+    manifest_path = (job or {}).get("batch_manifest_path")
+    if not manifest_path:
+        manifest_path = str(OUTPUT_FOLDER / "batches" / batch_id / "manifest.json")
+    try:
+        manifest = BatchRunner(batch_id, manifest_path, {}).request_cancel()
+    except FileNotFoundError:
+        return jsonify({"error": "Không tìm thấy batch"}), 404
+    return jsonify({"batch_id": batch_id, "status": manifest.get("status"), "cancel_requested": True})
+
+
+def _batch_manifest_for_route(batch_id: str):
+    job = get_job(batch_id)
+    manifest_path = (job or {}).get("batch_manifest_path")
+    if not manifest_path:
+        manifest_path = str(OUTPUT_FOLDER / "batches" / batch_id / "manifest.json")
+    return manifest_path, recover_stale_batch(manifest_path, job)
+
+
+@api_bp.route("/api/batch/<batch_id>/resume", methods=["POST"])
+def api_batch_resume(batch_id):
+    try:
+        manifest_path, manifest = _batch_manifest_for_route(batch_id)
+    except FileNotFoundError:
+        return jsonify({"error": "Không tìm thấy batch"}), 404
+    if manifest.get("status") == "processing":
+        return jsonify({"error": "Batch đang chạy"}), 409
+    manifest["cancel_requested"] = False
+    for item in manifest.get("items", []):
+        if item.get("status") in {"failed", "partial", "cancelled", "error"}:
+            item.update(status="queued", stage="queued", progress=0, error=None)
+    Path(manifest_path).write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    options = validate_batch_options(manifest.get("options") or {})
+    if not get_job(batch_id):
+        create_job(batch_id, mode="batch", batch_manifest_path=str(manifest_path), status="queued")
+    else:
+        get_job(batch_id)["cancel"] = False
+    submit(run_batch, batch_id, manifest_path, options)
+    return jsonify({"batch_id": batch_id, "status": "queued"}), 202
+
+
+@api_bp.route("/api/batch/<batch_id>/items/<item_id>/retry", methods=["POST"])
+def api_batch_item_retry(batch_id, item_id):
+    try:
+        manifest_path, manifest = _batch_manifest_for_route(batch_id)
+    except FileNotFoundError:
+        return jsonify({"error": "Không tìm thấy batch"}), 404
+    item = next((value for value in manifest.get("items", []) if value.get("item_id") == item_id), None)
+    if not item:
+        return jsonify({"error": "Không tìm thấy item"}), 404
+    if manifest.get("status") == "processing":
+        return jsonify({"error": "Batch đang chạy"}), 409
+    item.update(status="queued", stage="queued", progress=0, error=None)
+    manifest["cancel_requested"] = False
+    Path(manifest_path).write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    options = validate_batch_options(manifest.get("options") or {})
+    if not get_job(batch_id):
+        create_job(batch_id, mode="batch", batch_manifest_path=str(manifest_path), status="queued")
+    else:
+        get_job(batch_id)["cancel"] = False
+    submit(run_batch, batch_id, manifest_path, options)
+    return jsonify({"batch_id": batch_id, "item_id": item_id, "status": "queued"}), 202
+
+
+@api_bp.route("/api/batch/<batch_id>/manifest", methods=["GET"])
+def api_batch_manifest_download(batch_id):
+    try:
+        manifest_path, _manifest = _batch_manifest_for_route(batch_id)
+    except FileNotFoundError:
+        return jsonify({"error": "Không tìm thấy batch"}), 404
+    return send_file(manifest_path, as_attachment=True, download_name=f"{batch_id}-manifest.json")
 
 
 @api_bp.route("/api/pipeline/run", methods=["POST"])
@@ -1871,10 +2298,20 @@ def api_pipeline_run():
     if "file" in request.files:
         f = request.files["file"]
         if f and f.filename:
+            existing = get_job(job_id)
+            if existing and existing.get('status') not in {'uploaded','done','partial','error','cancelled','interrupted'}:
+                return jsonify({'error': 'Job đang hoạt động'}), 409
+            ext, error = _validate_uploaded_video(f)
+            if error:
+                raise ValueError(error)
             dest_dir = UPLOAD_FOLDER / job_id
             dest_dir.mkdir(parents=True, exist_ok=True)
-            vpath = dest_dir / "source.mp4"
+            vpath = dest_dir / ('source' + ext)
             f.save(str(vpath))
+            valid, error = _validate_media_path(vpath)
+            if not valid:
+                vpath.unlink(missing_ok=True)
+                raise ValueError(error)
             data["video_path"] = str(vpath)
             data["source_type"] = "upload"
             data["original_name"] = f.filename
@@ -1893,6 +2330,8 @@ def api_pipeline_run():
     try:
         res = start_pipeline_job(job_id, data)
         return jsonify(res)
+    except TimeoutError as exc:
+        return jsonify({'error': str(exc)}), 409
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -1914,7 +2353,70 @@ def api_pipeline_continue(job_id):
 
     from services.pipeline_orchestrator import resume_pipeline_job
     try:
-        res = resume_pipeline_job(job_id, updated_srt)
+        res = resume_pipeline_job(job_id, updated_srt, expected_revision=data.get('revision'))
         return jsonify(res)
+    except TimeoutError as exc:
+        return jsonify({'error': str(exc)}), 409
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
+
+
+@api_bp.route('/api/pipeline/review/<job_id>', methods=['GET', 'PUT'])
+def pipeline_review(job_id):
+    with host_lock('review-' + job_id, timeout=5):
+        job = get_job(job_id)
+        if not job or job.get('status') != 'awaiting_review' or not job.get('pending_pipeline'):
+            return jsonify({'error': 'Job không ở bước chờ duyệt'}), 409
+        if request.method == 'PUT':
+            data = request.get_json(silent=True) or {}
+            if data.get('revision') != job.get('review_revision', 0):
+                return jsonify({'error': 'Bản phụ đề đã được cập nhật ở nơi khác'}), 409
+            content = data.get('content')
+            if not isinstance(content, str) or len(content) > 10 * 1024 * 1024:
+                raise ValueError('Nội dung bản nháp không hợp lệ')
+            job.update(review_draft=content, review_revision=job.get('review_revision', 0)+1)
+            job.persist()
+        pending = job['pending_pipeline']
+        return jsonify({'content': job.get('review_draft', pending['target_srt_content']),
+                        'revision': job.get('review_revision', 0), 'lang': pending['target_lang']})
+
+
+@api_bp.route('/api/pipeline/retry/<job_id>', methods=['POST'])
+def retry_pipeline(job_id):
+    from services.pipeline_orchestrator import start_pipeline_job
+    job = get_job(job_id)
+    if not job or not job.get('pipeline_config'):
+        return jsonify({'error': 'Không tìm thấy cấu hình Studio để thử lại'}), 404
+    if job.get('status') not in {'error', 'partial', 'cancelled', 'interrupted'}:
+        raise TimeoutError('Chỉ thử lại tác vụ đã dừng hoặc chưa hoàn tất')
+    options = json.loads(json.dumps(job['pipeline_config']))
+    data = request.get_json(silent=True) or {}
+    lang = options.get('sub_options', {}).get('target_lang', 'vi')
+    srt_info = job.get('srt_files', {}).get(lang, {})
+    translation_incomplete = job.get('translation_quality', {}).get(lang, {}).get('unchanged_segments')
+    if srt_info.get('path') and Path(srt_info['path']).is_file() and (not translation_incomplete or data.get('target_srt_content')):
+        options['target_srt_content'] = data.get('target_srt_content') or Path(srt_info['path']).read_text(encoding='utf-8-sig')
+        options.pop('target_srt_path', None)
+        options.pop('srt_path', None)
+        options['steps']['extract_sub'] = False
+    if job.get('video_path') and Path(job['video_path']).is_file():
+        options.update(video_path=job['video_path'], source_type='upload', trim_intro='off')
+        options['steps']['download'] = False
+        if job.get('clean_video', {}).get('path') == job['video_path']:
+            options['steps']['clean_video'] = False
+            options.setdefault('burn_options', {})['render_mode'] = 'pure_burn'
+    if data.get('tts_options') is not None:
+        if not isinstance(data['tts_options'], dict):
+            raise ValueError('tts_options phải là object')
+        options.setdefault('tts_options', {}).update(data['tts_options'])
+    return jsonify(start_pipeline_job(job_id, options))
+
+
+@api_bp.route('/api/upload/session/<job_id>')
+def upload_session_status(job_id):
+    with host_lock('upload-' + job_id, timeout=5):
+        session = _load_chunk_session(job_id)
+        if not session:
+            return jsonify({'error': 'Phiên upload không tồn tại'}), 404
+        return jsonify({k: sorted(v) if isinstance(v, set) else v for k, v in session.items()
+                        if k in {'job_id','filename','total_size','chunk_size','total_chunks','received_chunks','finished_response'}})

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import math
 import subprocess
 import time
 from pathlib import Path
@@ -19,6 +20,7 @@ from config import DEVICE, OUTPUT_FOLDER, jobs
 from services.burn_sub import extract_subtitle_intervals
 from services.video.inpainters.lama_inpaint import LamaInpainter
 from services.video.inpainters.opencv_inpaint import OpenCVInpainter
+from services.media_process import FrameEncoder, encoder_args
 from services.video.mask_generator import feather_blend, generate_text_mask
 
 
@@ -59,6 +61,9 @@ def clean_video_pipeline(
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     duration = total_frames / fps if fps > 0 else 0
+    if width < 4 or height < 4 or not math.isfinite(fps) or fps <= 0 or total_frames <= 0:
+        cap.release()
+        raise ValueError('Thông số video không hợp lệ hoặc không xác định được số frame')
 
     # Calculate pixel bounding box from sub_region
     # Y-bounds from detected subtitle region
@@ -69,11 +74,9 @@ def clean_video_pipeline(
     sub_y -= sub_y % 2
     sub_h -= sub_h % 2
 
-    # X-bounds: Wide strip (90% width, 5% margin) so long sentences (14-20 chars) are never cut off
-    sub_x = max(0, int(width * 0.05))
-    sub_w = min(width - sub_x, int(width * 0.90))
-    sub_x -= sub_x % 2
-    sub_w -= sub_w % 2
+    # Honor the full manually selected rectangle, including horizontal bounds.
+    sub_x = max(0, min(int(width * sub_region.get("x_ratio", 0.05)), width - 4))
+    sub_w = max(4, min(int(width * sub_region.get("w_ratio", 0.90)), width - sub_x))
 
     # Extract subtitle intervals from SRT
     intervals = extract_subtitle_intervals(srt_content, min_gap=0.5, pad_start=0.10, pad_end=0.15)
@@ -89,13 +92,24 @@ def clean_video_pipeline(
         else:
             inpainter = OpenCVInpainter(method="telea")
 
-        temp_clean_video = str(OUTPUT_FOLDER / f"{job_id}_raw_clean.mp4")
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(temp_clean_video, fourcc, fps, (width, height))
-
-        if not writer.isOpened():
-            cap.release()
-            raise RuntimeError("Không thể khởi tạo VideoWriter")
+        actual_engine = 'opencv' if engine == 'lama' and inpainter.session is None else engine
+        has_tts = bool(tts_audio_path and os.path.isfile(tts_audio_path))
+        audio_source = tts_audio_path if has_tts else video_path
+        filters = []
+        if re_burn_ass_path:
+            if not os.path.isfile(re_burn_ass_path):
+                raise ValueError('Không tìm thấy file ASS')
+            ass_esc = str(re_burn_ass_path).replace('\\', '/').replace(':', '\\:').replace("'", "'\\''")
+            filters = ['-vf', f"ass='{ass_esc}'"]
+        cmd = ['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'bgr24',
+               '-s', f'{width}x{height}', '-r', str(fps), '-i', 'pipe:0',
+               '-i', str(audio_source), '-map', '0:v', '-map', '1:a?', *filters,
+               *encoder_args(), '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k',
+               *(['-af', 'apad'] if has_tts else []), '-t', str(duration),
+               '-movflags', '+faststart', str(output_path)]
+        writer = FrameEncoder(cmd, job_id)
+        interval_idx = 0
+        succeeded = False
 
         if job_id and jobs.get(job_id):
             jobs[job_id].setdefault(burn_key, {})["message"] = f"🧹 Đang xóa chữ AI ({engine})..."
@@ -117,7 +131,9 @@ def clean_video_pipeline(
                     raise RuntimeError("Đã hủy (Stop)")
 
                 current_time = frame_idx / fps if fps > 0 else 0
-                has_sub = any(s <= current_time <= e for s, e in intervals) if intervals else True
+                while interval_idx < len(intervals) and intervals[interval_idx][1] < current_time:
+                    interval_idx += 1
+                has_sub = not intervals or (interval_idx < len(intervals) and intervals[interval_idx][0] <= current_time)
 
                 if has_sub:
                     crop_strip = frame[sub_y : sub_y + sub_h, sub_x : sub_x + sub_w]
@@ -156,9 +172,18 @@ def clean_video_pipeline(
                     jobs[job_id].setdefault(burn_key, {})["message"] = (
                         f"🧹 Đang xóa chữ ({engine}): {pct}% ({frame_idx}/{total_frames}f, {fps_rate:.1f} fps)"
                     )
+            if total_frames > 0 and frame_idx < total_frames - 2:
+                raise RuntimeError('Video bị cắt ngắn khi giải mã')
+            succeeded = True
         finally:
             cap.release()
-            writer.release()
+            try:
+                writer.close(abort=not succeeded)
+            except Exception:
+                Path(output_path).unlink(missing_ok=True)
+                raise
+            if not succeeded:
+                Path(output_path).unlink(missing_ok=True)
 
     elapsed = time.time() - t_start
     print(f"✅ Inpainting loop finished: {inpainted_count}/{frame_idx} frames cleaned in {elapsed:.1f}s ({frame_idx/max(0.1, elapsed):.1f} fps)")
@@ -167,63 +192,29 @@ def clean_video_pipeline(
         jobs[job_id].setdefault(burn_key, {})["progress"] = 85
         jobs[job_id].setdefault(burn_key, {})["message"] = "🎬 Đang đóng gói video & âm thanh..."
 
-    # FFmpeg final encoding with audio and optional new subtitle burn
-    has_tts = tts_audio_path and os.path.exists(tts_audio_path)
-    audio_inputs = ["-i", tts_audio_path] if has_tts else []
-    audio_map = ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k"] if has_tts else ["-map", "1:a?", "-c:a", "copy"]
-
-    filter_complex = []
-    if re_burn_ass_path and os.path.exists(re_burn_ass_path):
-        ass_esc = str(re_burn_ass_path).replace("\\", "/").replace(":", "\\:")
-        if has_tts:
-            filter_complex = ["-filter_complex", f"[0:v]ass='{ass_esc}'[vout];[1:a]apad[aout]", "-map", "[vout]"]
-        else:
-            filter_complex = ["-filter_complex", f"[0:v]ass='{ass_esc}'[vout]", "-map", "[vout]"]
-    else:
-        if has_tts:
-            filter_complex = ["-filter_complex", "[1:a]apad[aout]", "-map", "0:v"]
-        else:
-            filter_complex = ["-map", "0:v"]
-
-    if DEVICE == "cuda":
-        video_codec = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "22", "-b:v", "0"]
-    else:
-        video_codec = ["-c:v", "libx264", "-preset", "fast", "-crf", "20"]
-
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", temp_clean_video,
-        *(["-i", video_path] if not has_tts else audio_inputs),
-        *filter_complex,
-        *audio_map,
-        *video_codec,
-        "-shortest",
-        output_path,
-    ]
-
-    res = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
-    Path(temp_clean_video).unlink(missing_ok=True)
-
-    if res.returncode != 0:
-        err = res.stderr[-500:] if res.stderr else "Lỗi FFmpeg không xác định"
-        raise RuntimeError(f"Lỗi đóng gói video: {err}")
-
     if not os.path.exists(output_path):
         raise RuntimeError("File video đầu ra không được tạo")
 
     file_size = os.path.getsize(output_path)
+    fallback_frames = getattr(inpainter, 'fallback_count', 0)
+    if engine == 'lama' and inpainter.session is not None and fallback_frames:
+        actual_engine = 'lama_opencv_fallback'
     mode_label = "Xóa sạch + Sub mới" if re_burn_ass_path else "Xóa sạch chữ (Clean Plate)"
     audio_label = "TTS" if has_tts else "gốc"
 
     result = {
         "status": "done",
         "progress": 100,
-        "message": f"Hoàn thành ({file_size / 1048576:.1f}MB) • {mode_label} ({engine}) • Audio: {audio_label}",
+        "message": f"Hoàn thành ({file_size / 1048576:.1f}MB) • {mode_label} ({actual_engine}) • Audio: {audio_label}",
         "path": output_path,
         "filename": Path(output_path).name,
         "size": file_size,
         "duration": round(duration, 1),
-        "method": f"clean_{engine}",
+        "method": f"clean_{actual_engine}",
+        "requested_engine": engine,
+        "fallback_calls": fallback_frames,
+        "encode_passes": 1,
+        "timing_mode": "cfr",
         "audio_replaced": has_tts,
         "inpainted_frames": inpainted_count,
     }

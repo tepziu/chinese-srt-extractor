@@ -6,17 +6,20 @@ Periodically inspects monitored channels for new uploads and triggers the Studio
 from __future__ import annotations
 
 import os
+import json
 import random
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from services.runtime_state import host_lock, runtime_dir
 
 from services.douyin_monitor.channel_manager import (
     get_channels,
     get_downloaded_history,
     mark_as_downloaded,
     save_channels,
+    update_channel,
 )
 from services.douyin_monitor.crawler import (
     download_master_video,
@@ -51,6 +54,11 @@ def get_monitor_status() -> dict:
     """Return current status of the monitoring daemon."""
     with _lock:
         st = dict(_status)
+        if not (_monitor_thread and _monitor_thread.is_alive()):
+            try:
+                st.update(json.loads((runtime_dir()/'monitor-status.json').read_text(encoding='utf-8')))
+            except (OSError, ValueError):
+                pass
         st["running"] = is_monitor_running()
         return st
 
@@ -58,7 +66,28 @@ def get_monitor_status() -> dict:
 def is_monitor_running() -> bool:
     """Check if background monitoring daemon is active."""
     global _monitor_thread
-    return _monitor_thread is not None and _monitor_thread.is_alive()
+    if _monitor_thread is not None and _monitor_thread.is_alive():
+        return True
+    try:
+        with host_lock('douyin-monitor', timeout=0):
+            return False
+    except TimeoutError:
+        return True
+
+
+def _control(**updates):
+    with host_lock('monitor-control', timeout=5):
+        path = runtime_dir()/'monitor-control.json'
+        try:
+            data = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            data = {'enabled': True, 'scan': 0}
+        if updates:
+            data.update(updates)
+            temp = path.with_suffix('.tmp')
+            temp.write_text(json.dumps(data), encoding='utf-8')
+            temp.replace(path)
+        return data
 
 
 def start_monitor(interval: int = 3600) -> bool:
@@ -71,6 +100,7 @@ def start_monitor(interval: int = 3600) -> bool:
             return True
 
         _stop_event.clear()
+        _control(enabled=True)
         _wake_event.clear()
         _status["interval"] = interval
         _status["running"] = True
@@ -90,6 +120,7 @@ def start_monitor(interval: int = 3600) -> bool:
 def stop_monitor() -> bool:
     """Stop the background monitoring loop."""
     global _monitor_thread, _stop_event, _wake_event
+    _control(enabled=False)
 
     with _lock:
         if not is_monitor_running():
@@ -104,22 +135,37 @@ def stop_monitor() -> bool:
     if _monitor_thread and _monitor_thread.is_alive():
         _monitor_thread.join(timeout=5)
     print("[DouyinDaemon] Monitor stopped.")
-    return True
+    return not is_monitor_running()
 
 
 def scan_now() -> dict:
     """Trigger an immediate scan pass without waiting for interval."""
     if not is_monitor_running():
+        _stop_event.clear()
         t = threading.Thread(target=_scan_pass, daemon=True)
         t.start()
         return {"status": "started", "message": "Đã kích hoạt quét kênh thủ công (One-off)"}
     else:
+        _control(scan=time.time())
         _wake_event.set()
         return {"status": "triggered", "message": "Đã đánh thức tiến trình quét kênh ngay lập tức"}
 
 
 def _scan_pass() -> dict:
+    try:
+        with host_lock('douyin-scan', timeout=0):
+            return _perform_scan()
+    except TimeoutError:
+        return {'status': 'busy', 'message': 'Một lượt quét đang hoạt động'}
+
+
+def _perform_scan() -> dict:
     """Perform one full pass across all enabled channels."""
+    from services.douyin_monitor.pipeline_bridge import retry_pending_deliveries
+    try:
+        retry_pending_deliveries()
+    except TimeoutError:
+        pass
     with _lock:
         _status["last_scan_status"] = "scanning"
         _status["current_task"] = "Đang nạp danh sách kênh..."
@@ -146,12 +192,12 @@ def _scan_pass() -> dict:
         # 1. Resolve sec_uid if missing or incomplete
         if not sec_uid or sec_uid.startswith("MS4wLjABAAAA_rP") or len(sec_uid) < 30:
             print(f"[DouyinDaemon] Đang phân giải sec_uid cho kênh {cid}...")
-            resolved_uid, resolved_nick = resolve_channel_sec_uid(cid)
+            resolved_uid, resolved_nick, *_ = resolve_channel_sec_uid(cid)
             if resolved_uid:
                 sec_uid = resolved_uid
                 ch["sec_uid"] = resolved_uid
                 ch["nickname"] = resolved_nick or nickname
-                save_channels(channels)
+                update_channel(cid, {'sec_uid': resolved_uid, 'nickname': ch['nickname']})
             else:
                 err_msg = f"Không tìm thấy sec_uid cho kênh {cid}"
                 print(f"[DouyinDaemon] ❌ {err_msg}")
@@ -160,15 +206,16 @@ def _scan_pass() -> dict:
 
         # 2. Fetch latest works
         try:
-            works = fetch_channel_videos(sec_uid, max_count=18)
+            works = fetch_channel_videos(sec_uid, max_count=100)
             ch["last_check"] = int(time.time())
-            save_channels(channels)
+            update_channel(cid, {'last_check': ch['last_check']})
 
             if not works:
                 continue
 
             # Cutoff: Only process videos published from today onwards (start of day)
-            today_start = int(datetime(datetime.now().year, datetime.now().month, datetime.now().day, 0, 0, 0).timestamp())
+            # Bounded backfill across midnight and downtime; never mark skipped work successful.
+            cutoff = int(time.time()) - int(os.getenv('DOUYIN_BACKFILL_HOURS', '72')) * 3600
             
             new_works = []
             for w in works:
@@ -176,10 +223,7 @@ def _scan_pass() -> dict:
                 ctime = w.get("create_time", 0)
                 if not wid or wid in history:
                     continue
-                if ctime < today_start:
-                    # Mark past video as already seen so it won't be re-downloaded
-                    history.add(wid)
-                    mark_as_downloaded(wid)
+                if ctime < cutoff:
                     continue
                 new_works.append(w)
 
@@ -216,7 +260,9 @@ def _scan_pass() -> dict:
                     if downloaded_file and os.path.exists(downloaded_file):
                         print(f"[DouyinDaemon] ✅ Đã tải video master: {downloaded_file}")
                         try:
-                            execute_auto_pipeline(w, ch, downloaded_file)
+                            result = execute_auto_pipeline(w, ch, downloaded_file)
+                            if not result or result.get('status') not in {'done', 'downloaded'}:
+                                raise RuntimeError('Pipeline chưa hoàn tất; giữ lại để thử lại')
                             history.add(wid)
                             mark_as_downloaded(wid)
                         except Exception as proc_err:
@@ -252,10 +298,19 @@ def _scan_pass() -> dict:
 
 
 def _monitor_loop(interval: int):
+    try:
+        with host_lock('douyin-monitor', timeout=0):
+            _run_monitor_loop(interval)
+    except TimeoutError:
+        print('[DouyinMonitor] Đã có monitor chạy trong tiến trình khác.')
+
+
+def _run_monitor_loop(interval: int):
     """Main infinite daemon loop."""
     print(f"[DouyinDaemon] Vòng lặp giám sát kênh Douyin bắt đầu (Chu kỳ: {interval}s)...")
 
-    while not _stop_event.is_set():
+    while not _stop_event.is_set() and _control().get('enabled', True):
+        scan_revision = _control().get('scan', 0)
         try:
             _scan_pass()
         except Exception as exc:
@@ -264,7 +319,14 @@ def _monitor_loop(interval: int):
                 _status["last_error"] = str(exc)
 
         # Wait for interval or wake event
-        _wake_event.wait(timeout=interval)
+        (runtime_dir()/'monitor-status.json').write_text(json.dumps(_status, ensure_ascii=False), encoding='utf-8')
+        deadline = time.monotonic() + interval
+        while time.monotonic() < deadline and not _stop_event.is_set():
+            control = _control()
+            if not control.get('enabled', True) or control.get('scan', 0) != scan_revision:
+                break
+            if _wake_event.wait(timeout=0.5):
+                break
         _wake_event.clear()
 
     print("[DouyinDaemon] Vòng lặp giám sát đã kết thúc.")

@@ -12,6 +12,7 @@ from pathlib import Path
 from config import DEVICE, COMPUTE_TYPE, LANGUAGES, MODEL_MAP, OUTPUT_FOLDER, UPLOAD_FOLDER, jobs, safe_stem
 from services.srt_utils import format_timestamp, generate_srt, validate_srt
 from services.translation import translate_srt, translate_srt_ai
+from services.runtime_state import serial_task
 
 _models = {}
 _model_lock = threading.Lock()
@@ -23,6 +24,11 @@ def get_model(model_size: str = "large-v3-turbo"):
     if model_size not in _models:
         with _model_lock:
             if model_size not in _models:
+                # A personal workstation keeps one Whisper variant resident.
+                if _models:
+                    _models.clear()
+                    import gc
+                    gc.collect()
                 from faster_whisper import WhisperModel
 
                 actual_model = MODEL_MAP.get(model_size, model_size)
@@ -152,7 +158,8 @@ def split_segments_by_sentence(segments, max_chars: int = 30):
     return result
 
 
-def process_video(job_id: str, video_path: str, model_size: str, translate_langs: list[str], translate_method: str = "ai", translation_mode: str = "movie") -> None:
+@serial_task
+def process_video(job_id: str, video_path: str, model_size: str, translate_langs: list[str], translate_method: str = "ai", translation_mode: str = "movie", manage_status: bool = True) -> None:
     """Run the complete Whisper -> SRT -> translation pipeline in a worker."""
     audio_path = None
     total_started = time.time()
@@ -162,6 +169,9 @@ def process_video(job_id: str, video_path: str, model_size: str, translate_langs
     translation_mode = translation_mode or job.get("translation_mode", "movie")
     job["translation_mode"] = translation_mode
     try:
+        if job.get('cancel'):
+            job.update(status='cancelled', message='Đã hủy nhận dạng')
+            return
         # Step 0: Ingest cover trimming if requested
         trim_intro = job.get("trim_intro", "auto")
         if trim_intro and str(trim_intro).lower() != "off":
@@ -237,7 +247,7 @@ def process_video(job_id: str, video_path: str, model_size: str, translate_langs
         split_segments = split_segments_by_sentence(segments, max_chars=30)
         if not split_segments:
             job.update({
-                "status": "done",
+                "status": "done" if manage_status else "processing",
                 "progress": 100,
                 "segment_count": 0,
                 "raw_segment_count": len(segments),
@@ -261,7 +271,7 @@ def process_video(job_id: str, video_path: str, model_size: str, translate_langs
         zh_path.write_text(srt_content, encoding="utf-8")
 
         job.update({
-            "status": "translating" if translate_langs else "done",
+            "status": "translating" if translate_langs else ("done" if manage_status else "processing"),
             "progress": 100,
             "segment_count": len(split_segments),
             "raw_segment_count": len(segments),
@@ -302,7 +312,8 @@ def process_video(job_id: str, video_path: str, model_size: str, translate_langs
                 }
 
         job["total_time"] = round(time.time() - total_started, 1)
-        job["status"] = "done"
+        has_errors = any('error' in info for info in job.get('srt_files', {}).values()) or any(q.get('unchanged_segments') for q in job.get('translation_quality', {}).values())
+        job["status"] = ("partial" if has_errors else "done") if manage_status else "processing"
         job["message"] = f"Hoàn thành trong {job['total_time']:.0f}s!"
         if Path(video_path).exists():
             job["video_file"] = {

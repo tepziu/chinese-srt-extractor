@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from services.runtime_state import host_lock
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -37,7 +38,7 @@ DEFAULT_CHANNELS = [
 
 def load_channels() -> list[dict]:
     """Load list of monitored Douyin channels."""
-    with _lock:
+    with _lock, host_lock('douyin-config', timeout=15):
         if CHANNELS_FILE.exists():
             try:
                 data = json.loads(CHANNELS_FILE.read_text(encoding="utf-8"))
@@ -51,9 +52,9 @@ def load_channels() -> list[dict]:
 
 def save_channels(channels: list[dict]) -> None:
     """Save list of monitored Douyin channels."""
-    with _lock:
+    with _lock, host_lock('douyin-config', timeout=15):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        CHANNELS_FILE.write_text(json.dumps(channels, ensure_ascii=False, indent=2), encoding="utf-8")
+        _atomic_write(CHANNELS_FILE, channels)
 
 
 def get_channels() -> list[dict]:
@@ -77,7 +78,7 @@ def add_channel(
     if not clean_id:
         raise ValueError("Channel ID không được để trống")
 
-    with _lock:
+    with _lock, host_lock('douyin-config', timeout=15):
         channels = load_channels()
         for ch in channels:
             if ch.get("channel_id", "").lower() == clean_id.lower():
@@ -116,7 +117,7 @@ def add_channel(
 def remove_channel(channel_id: str) -> bool:
     """Remove a channel from the monitoring list."""
     clean_id = channel_id.strip().lower()
-    with _lock:
+    with _lock, host_lock('douyin-config', timeout=15):
         channels = load_channels()
         initial_len = len(channels)
         channels = [ch for ch in channels if ch.get("channel_id", "").lower() != clean_id]
@@ -129,7 +130,7 @@ def remove_channel(channel_id: str) -> bool:
 def toggle_channel(channel_id: str, enabled: bool) -> bool:
     """Enable or disable monitoring for a specific channel."""
     clean_id = channel_id.strip().lower()
-    with _lock:
+    with _lock, host_lock('douyin-config', timeout=15):
         channels = load_channels()
         for ch in channels:
             if ch.get("channel_id", "").lower() == clean_id:
@@ -142,7 +143,7 @@ def toggle_channel(channel_id: str, enabled: bool) -> bool:
 def update_channel(channel_id: str, updates: dict) -> dict | None:
     """Update settings for a channel."""
     clean_id = channel_id.strip().lower()
-    with _lock:
+    with _lock, host_lock('douyin-config', timeout=15):
         channels = load_channels()
         for ch in channels:
             if ch.get("channel_id", "").lower() == clean_id:
@@ -156,7 +157,7 @@ def update_channel(channel_id: str, updates: dict) -> dict | None:
 
 def load_history() -> set[str]:
     """Load set of already processed aweme_ids."""
-    with _lock:
+    with _lock, host_lock('douyin-config', timeout=15):
         if HISTORY_FILE.exists():
             try:
                 data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
@@ -169,9 +170,9 @@ def load_history() -> set[str]:
 
 def save_history(history: set[str]) -> None:
     """Save set of processed aweme_ids."""
-    with _lock:
+    with _lock, host_lock('douyin-config', timeout=15):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        HISTORY_FILE.write_text(json.dumps(sorted(list(history)), ensure_ascii=False, indent=2), encoding="utf-8")
+        _atomic_write(HISTORY_FILE, sorted(history))
 
 
 def get_downloaded_history() -> set[str]:
@@ -181,7 +182,7 @@ def get_downloaded_history() -> set[str]:
 def mark_as_downloaded(aweme_id: str) -> None:
     if not aweme_id:
         return
-    with _lock:
+    with _lock, host_lock('douyin-config', timeout=15):
         h = load_history()
         h.add(str(aweme_id))
         save_history(h)
@@ -189,14 +190,14 @@ def mark_as_downloaded(aweme_id: str) -> None:
 
 def set_notify_chat_id(chat_id: int | str) -> None:
     """Save the Telegram chat ID to receive automated video alerts."""
-    with _lock:
+    with _lock, host_lock('douyin-config', timeout=15):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        NOTIFY_CHAT_FILE.write_text(json.dumps({"chat_id": str(chat_id)}), encoding="utf-8")
+        _atomic_write(NOTIFY_CHAT_FILE, {'chat_id': str(chat_id)})
 
 
 def get_notify_chat_id() -> str | None:
     """Get the active Telegram chat ID for notifications."""
-    with _lock:
+    with _lock, host_lock('douyin-config', timeout=15):
         if NOTIFY_CHAT_FILE.exists():
             try:
                 data = json.loads(NOTIFY_CHAT_FILE.read_text(encoding="utf-8"))
@@ -204,3 +205,8 @@ def get_notify_chat_id() -> str | None:
             except Exception:
                 pass
     return os.getenv("TELEGRAM_CHAT_ID")
+
+def _atomic_write(path, data):
+    temp = path.with_suffix('.tmp')
+    temp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+    temp.replace(path)

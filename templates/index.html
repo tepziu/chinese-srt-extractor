@@ -216,6 +216,97 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
             <button class="main-mode-tab" id="tabMainDouyin" onclick="switchMainMode('douyin')">
                 <span>🛰️</span> GIÁM SÁT KÊNH DOUYIN (24/7)
             </button>
+            <button class="main-mode-tab" id="tabMainBatch" onclick="switchMainMode('batch')">
+                <span>📁</span> DỊCH CẢ THƯ MỤC
+            </button>
+        </div>
+
+        <!-- ================================================================= -->
+        <!-- CHẾ ĐỘ BATCH: DỊCH TOÀN BỘ THƯ MỤC                              -->
+        <!-- ================================================================= -->
+        <div class="card" id="cardBatchView" style="display:none;">
+            <div style="font-size:16px; font-weight:800; margin-bottom:6px; color:#60a5fa;">📁 Dịch toàn bộ video trong thư mục</div>
+            <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">
+                Tự động nhận diện phụ đề Trung, dịch sang English, xuất .SRT và tùy chọn in video mới. Video gốc không bị ghi đè.
+            </p>
+            <div style="display:grid; grid-template-columns:1fr auto; gap:8px; align-items:end;">
+                <label style="font-size:11px; color:var(--text-secondary);">Đường dẫn thư mục local
+                    <input id="batchFolderPath" type="text" class="url-input" placeholder="D:\\Videos\\ChineseSeries" style="margin-top:5px; width:100%;">
+                </label>
+                <label style="font-size:11px; color:var(--text-secondary); display:flex; gap:6px; align-items:center; padding-bottom:10px;">
+                    <input id="batchRecursive" type="checkbox" checked> Quét thư mục con
+                </label>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-top:12px;">
+                <label style="font-size:11px;">Engine phụ đề
+                    <select id="batchSubtitleEngine" style="width:100%; margin-top:5px; padding:7px; background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:6px;">
+                        <option value="hybrid" selected>Hybrid (khuyên dùng)</option>
+                        <option value="gemini">Gemini Vision</option>
+                        <option value="whisper">Whisper ASR</option>
+                    </select>
+                </label>
+                <label style="font-size:11px;">Phong cách dịch
+                    <select id="batchTranslationMode" style="width:100%; margin-top:5px; padding:7px; background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:6px;">
+                        <option value="movie" selected>Điện ảnh / tự nhiên</option>
+                        <option value="literal">Sát nghĩa</option>
+                        <option value="driving">Hướng dẫn lái xe</option>
+                        <option value="fun">Hài hước Douyin</option>
+                    </select>
+                </label>
+                <label style="font-size:11px;">Xử lý phụ đề Trung cũ
+                    <select id="batchRemovalMode" style="width:100%; margin-top:5px; padding:7px; background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:6px;">
+                        <option value="opaque_band" selected>Che kín 100% (ổn định)</option>
+                        <option value="inpaint_burn">Clean Plate / Inpaint</option>
+                        <option value="blur">Blur theo thời điểm</option>
+                    </select>
+                </label>
+            </div>
+            <div style="margin-top:14px; padding:12px; border:1px solid var(--border); border-radius:8px; background:rgba(59,130,246,0.04);">
+                <div style="font-size:12px; font-weight:700; margin-bottom:8px;">📐 Vùng xử lý và vị trí in phụ đề tiếng Anh</div>
+                <p style="font-size:11px; color:var(--text-muted); margin-bottom:10px;">Vùng này vừa dùng để che/xóa phụ đề Trung cũ, vừa là vùng đặt phụ đề Anh mới.</p>
+                <select id="batchRegionMode" onchange="toggleBatchRegionMode()" style="width:100%; padding:7px; background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:6px;">
+                    <option value="auto" selected>🔍 Tự nhận diện riêng cho từng video</option>
+                    <option value="manual">📐 Chọn thủ công một vùng cho toàn bộ thư mục</option>
+                </select>
+                <div id="batchAutoRegionPanel" style="margin-top:10px;">
+                    <button type="button" class="btn-secondary" onclick="previewBatchRegion('auto', false)">🔍 Xem thử vùng tự nhận diện trên video đầu tiên</button>
+                    <button id="batchUseDetectedBtn" type="button" class="btn-secondary" style="display:none; margin-left:6px;" onclick="applyDetectedBatchRegion()">Dùng vùng này cho toàn bộ batch</button>
+                </div>
+                <div id="batchManualRegionPanel" style="display:none; margin-top:10px;">
+                    <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px;">
+                        <label style="font-size:10px;">X bắt đầu (%)<input id="batchRegionX" type="number" min="0" max="100" step="0.1" value="5" style="width:100%; margin-top:4px; padding:6px;"></label>
+                        <label style="font-size:10px;">Y bắt đầu (%)<input id="batchRegionY" type="number" min="0" max="100" step="0.1" value="78" style="width:100%; margin-top:4px; padding:6px;"></label>
+                        <label style="font-size:10px;">Chiều rộng (%)<input id="batchRegionW" type="number" min="0.1" max="100" step="0.1" value="90" style="width:100%; margin-top:4px; padding:6px;"></label>
+                        <label style="font-size:10px;">Chiều cao (%)<input id="batchRegionH" type="number" min="0.1" max="100" step="0.1" value="17" style="width:100%; margin-top:4px; padding:6px;"></label>
+                    </div>
+                    <button type="button" class="btn-secondary" style="margin-top:8px;" onclick="previewBatchRegion('manual', false)">🖼️ Xem thử vùng thủ công</button>
+                </div>
+                <div id="batchRegionPreviewBox" style="display:none; margin-top:10px;">
+                    <div id="batchRegionPreviewStatus" style="font-size:11px; color:var(--text-secondary); margin-bottom:6px;"></div>
+                    <div id="batchRegionPreviewCanvas" style="position:relative; display:inline-block; max-width:100%; user-select:none; touch-action:none;">
+                        <img id="batchRegionPreviewImage" alt="Preview vùng phụ đề" style="display:block; max-width:100%; max-height:360px; border:1px solid var(--border); border-radius:6px;">
+                        <div id="batchRegionOverlay" style="position:absolute; display:none; border:3px solid #f59e0b; background:rgba(245,158,11,0.16); box-sizing:border-box; pointer-events:none;">
+                            <span style="position:absolute; left:3px; top:2px; font-size:10px; color:#fbbf24; font-weight:800; text-shadow:0 1px 2px #000;">SUB / ENGLISH</span>
+                        </div>
+                    </div>
+                    <div style="font-size:10px; color:var(--text-muted); margin-top:5px;">Ở chế độ thủ công, kéo chuột trực tiếp trên ảnh để chọn vùng phụ đề.</div>
+                </div>
+            </div>
+
+            <div style="display:flex; flex-wrap:wrap; gap:14px; margin:14px 0; font-size:11px; color:var(--text-secondary);">
+                <label><input id="batchOutputVideo" type="checkbox" checked> Xuất video tiếng Anh</label>
+                <label><input id="batchStrict" type="checkbox" checked> Dừng render nếu dịch fallback/chưa hoàn chỉnh</label>
+                <label><input id="batchSkipExisting" type="checkbox" checked> Bỏ qua file đã hoàn tất</label>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <button class="btn-primary-studio" style="margin:0; background:linear-gradient(135deg,#2563eb,#1d4ed8);" onclick="runBatchFolder()">🚀 BẮT ĐẦU DỊCH THƯ MỤC</button>
+                <button class="btn-secondary" type="button" onclick="stopBatchFolder()">Dừng batch</button>
+            </div>
+            <div id="batchStatusCard" style="display:none; margin-top:16px; padding:12px; border:1px solid var(--border); border-radius:8px;">
+                <div id="batchStatusText" role="status" style="font-size:12px; margin-bottom:8px;"></div>
+                <div style="height:8px; background:var(--bg-secondary); border-radius:4px; overflow:hidden;"><div id="batchProgressBar" style="height:100%; width:0%; background:#2563eb; transition:width .3s;"></div></div>
+                <div id="batchItems" style="margin-top:10px; max-height:260px; overflow:auto; font-size:11px;"></div>
+            </div>
         </div>
 
         <!-- ================================================================= -->
@@ -338,7 +429,8 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                                 <div class="quick-box" style="margin:0; padding:10px;">
                                     <label style="font-size:11px; font-weight:600; display:block; margin-bottom:4px;">🤖 Động cơ nhận diện chữ Hán:</label>
                                     <select id="pipeSubEngine" style="width:100%; padding:6px 8px; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:11px;">
-                                        <option value="gemini" selected>🌟 Gemini 3.8 Flash High (Đọc chữ trên hình - Khuyên dùng)</option>
+                                        <option value="hybrid" selected>🧬 Hybrid Auto (Gemini đọc chữ + Whisper đối chiếu + AI gộp câu)</option>
+                                        <option value="gemini">🌟 Gemini Vision (Đọc chữ trên hình)</option>
                                         <option value="whisper">🎙️ Faster-Whisper Large V3 (Nghe giọng nói từ âm thanh)</option>
                                     </select>
                                 </div>
@@ -540,6 +632,8 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                 <p style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">
                     Hệ thống đã nhận diện và dịch xong file phụ đề. Bạn có thể kiểm tra hoặc sửa trực tiếp các câu thoại bên dưới trước khi hệ thống tạo giọng đọc và in sub lên video.
                 </p>
+                <div id="reviewSaveStatus" style="font-size:12px;color:var(--text-secondary)"></div>
+                <button id="reviewRestoreLocal" type="button" hidden onclick="StudioReviewEditor.restoreLocalDraft()">Khôi phục bản nháp trên máy vào trình soạn thảo</button>
                 <textarea id="reviewSrtTextarea" rows="7" style="width:100%; padding:10px; background:var(--bg-card); border:1px solid var(--border); border-radius:8px; color:var(--text-primary); font-family:monospace; font-size:12px; resize:vertical; margin-bottom:12px;"></textarea>
                 <div style="display:flex; gap:10px; justify-content:flex-end;">
                     <button type="button" class="btn-primary-studio" style="margin:0; padding:8px 18px; font-size:12px; background:linear-gradient(135deg, #10b981, #059669);" onclick="confirmAndContinuePipeline()">
@@ -553,9 +647,11 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
         <!-- KẾT QUẢ HOÀN TẤT & DOWNLOAD HUB                                   -->
         <!-- ================================================================= -->
         <div class="card result-section" id="resultSection">
+            <p id="pipelineResultNotice" role="status"></p>
+            <button id="retryPipelineBtn" type="button" style="display:none" onclick="retryStudioPipeline()">Thử lại các bước chưa hoàn tất</button>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
                 <h3 style="margin:0; font-size:18px; font-weight:800; color:#10b981; display:flex; align-items:center; gap:8px;">
-                    <span>🎉</span> Quy trình hoàn tất thành công!
+                    <span>📋</span> Kết quả xử lý
                 </h3>
                 <button class="btn-exit" style="position:static; background:rgba(255,255,255,0.05); color:#eee; border-color:var(--border);" onclick="resetAll()">🔄 Làm video khác</button>
             </div>
@@ -1017,6 +1113,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
             <div class="error-msg" id="errorMsg"></div>
         </div>
 
+        <script src="/static/js/studio-review.js"></script>
         <script>
     // --- LOAD DEVICE INFO IMMEDIATELY ---
     async function loadDeviceInfo() {
@@ -1061,10 +1158,12 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
         document.getElementById('tabMainPipeline').classList.toggle('active', mode === 'pipeline');
         document.getElementById('tabMainToolbox').classList.toggle('active', mode === 'toolbox');
         document.getElementById('tabMainDouyin').classList.toggle('active', mode === 'douyin');
+        document.getElementById('tabMainBatch').classList.toggle('active', mode === 'batch');
 
         document.getElementById('cardPipelineView').style.display = (mode === 'pipeline') ? 'block' : 'none';
         document.getElementById('cardToolboxView').style.display = (mode === 'toolbox') ? 'block' : 'none';
         document.getElementById('cardDouyinView').style.display = (mode === 'douyin') ? 'block' : 'none';
+        document.getElementById('cardBatchView').style.display = (mode === 'batch') ? 'block' : 'none';
 
         if (mode === 'douyin') {
             loadDouyinMonitorStatus();
@@ -1241,7 +1340,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                     burn_sub: document.getElementById('chkStep5') ? document.getElementById('chkStep5').checked : true
                 },
                 sub_options: {
-                    engine: document.getElementById('pipeSubEngine') ? document.getElementById('pipeSubEngine').value : 'gemini',
+                    engine: document.getElementById('pipeSubEngine') ? document.getElementById('pipeSubEngine').value : 'hybrid',
                     target_lang: document.getElementById('pipeTargetLang') ? document.getElementById('pipeTargetLang').value : 'vi',
                     style: document.getElementById('pipeStyleSelect') ? document.getElementById('pipeStyleSelect').value : 'movie',
                     translate_method: 'ai',
@@ -1343,9 +1442,40 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
         }
     }
 
+    async function retryStudioPipeline() {
+        try {
+            const response = await fetch('/api/pipeline/retry/' + pipelineJobId, {
+                method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Không thể thử lại');
+            hideSection('resultSection');
+            showSection('progressSection');
+            startPollingPipeline(data.job_id);
+        } catch (error) { alert(error.message); }
+    }
+
+    window.addEventListener('load', async () => {
+        let id;
+        try { id = localStorage.getItem('studio-current-job'); } catch (_) {}
+        if (!id || !/^[A-Za-z0-9_-]{6,64}$/.test(id)) return;
+        try {
+            const response = await fetch('/api/status/' + id);
+            if (!response.ok) return;
+            const job = await response.json();
+            pipelineJobId = currentJobId = id;
+            showSection('progressSection');
+            startPollingPipeline(id);
+        } catch (_) {}
+    });
+
     function startPollingPipeline(jobId) {
+        try { localStorage.setItem('studio-current-job', jobId); } catch (_) {}
         if (pipelinePollInterval) clearInterval(pipelinePollInterval);
+        let busy = false;
         pipelinePollInterval = setInterval(async () => {
+            if (busy) return;
+            busy = true;
             try {
                 const resp = await fetch('/api/status/' + jobId);
                 if (!resp.ok) return;
@@ -1354,28 +1484,26 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                 updatePipelineProgressUI(job);
 
                 if (job.status === 'awaiting_review') {
-                    const targetLang = document.getElementById('pipeTargetLang').value;
-                    const srtObj = (job.srt_files && job.srt_files[targetLang]) || (job.srt_files && job.srt_files['vi']) || {};
-                    const srtPreview = srtObj.preview || '';
                     document.getElementById('reviewBox').style.display = 'block';
-                    document.getElementById('reviewSrtTextarea').value = srtPreview;
+                    await StudioReviewEditor.load(jobId);
                 } else {
                     document.getElementById('reviewBox').style.display = 'none';
                 }
 
-                if (job.status === 'done') {
+                if (job.status === 'done' || job.status === 'partial') {
                     clearInterval(pipelinePollInterval);
                     onPipelineFinished(job);
-                } else if (job.status === 'error') {
+                } else if (['error', 'cancelled', 'interrupted'].includes(job.status)) {
                     clearInterval(pipelinePollInterval);
                     document.getElementById('progressText').textContent = '❌ ' + (job.message || 'Lỗi xử lý');
                     document.getElementById('progressPercent').textContent = '!';
+                    onPipelineFinished(job);
                     document.getElementById('btnRunPipeline').disabled = false;
                     document.getElementById('btnRunPipeline').innerHTML = '<span>🚀 BẮT ĐẦU CHẠY QUY TRÌNH STUDIO (START PIPELINE)</span>';
                 }
             } catch (e) {
                 console.error('Polling error:', e);
-            }
+            } finally { busy = false; }
         }, 1500);
     }
 
@@ -1384,7 +1512,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
         if (btn) {
             if (job.status === 'processing' || job.status === 'queued') {
                 btn.disabled = true;
-                btn.innerHTML = `<span>⏳ ${job.progress || 0}% - ${job.message || 'Đang xử lý...'}</span>`;
+                btn.textContent = `⏳ ${job.progress || 0}% - ${job.message || 'Đang xử lý...'}`;
             } else if (job.status === 'awaiting_review') {
                 btn.disabled = true;
                 btn.innerHTML = '<span>⏸️ Đang chờ bạn duyệt phụ đề bên dưới...</span>';
@@ -1422,15 +1550,16 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
 
     async function confirmAndContinuePipeline() {
         if (!pipelineJobId) return;
-        const updatedSrt = document.getElementById('reviewSrtTextarea').value;
         try {
+            const reviewPayload = await StudioReviewEditor.submitData();
             const resp = await fetch('/api/pipeline/continue/' + pipelineJobId, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ updated_srt: updatedSrt })
+                body: JSON.stringify(reviewPayload)
             });
             const data = await resp.json();
             if (data.error) throw new Error(data.error);
+            StudioReviewEditor.complete();
             document.getElementById('reviewBox').style.display = 'none';
         } catch (e) {
             alert('Lỗi tiếp tục: ' + e.message);
@@ -1479,6 +1608,11 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
         document.getElementById('btnRunPipeline').disabled = false;
         document.getElementById('btnRunPipeline').innerHTML = '<span>🚀 BẮT ĐẦU CHẠY QUY TRÌNH STUDIO (START PIPELINE)</span>';
 
+        document.getElementById('pipelineResultNotice').textContent = (job.status === 'done' ? '✅ ' : '⚠️ ') + (job.message || job.status);
+        document.getElementById('retryPipelineBtn').style.display = ['partial', 'error', 'interrupted', 'cancelled'].includes(job.status) ? 'inline-block' : 'none';
+        ['dlSourceVideo','dlZhSrt','dlTargetSrt','dlCleanVideo','dlTtsAudio','dlFinalVideo'].forEach(id => {
+            document.getElementById(id).style.display = 'none';
+        });
         const dlSrc = document.getElementById('dlSourceVideo');
         const dlZh = document.getElementById('dlZhSrt');
         const dlTarget = document.getElementById('dlTargetSrt');
@@ -1494,7 +1628,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
             dlZh.style.display = 'inline-flex';
             dlZh.href = '/api/download/' + job.job_id + '/zh';
         }
-        const targetLang = document.getElementById('pipeTargetLang').value;
+        const targetLang = job.pipeline_config?.sub_options?.target_lang || document.getElementById('pipeTargetLang').value;
         if (job.srt_files && (job.srt_files[targetLang] || job.srt_files.vi)) {
             const tLang = job.srt_files[targetLang] ? targetLang : 'vi';
             dlTarget.style.display = 'inline-flex';
@@ -1505,13 +1639,13 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
             dlClean.style.display = 'inline-flex';
             dlClean.href = '/api/download-burned-video/' + job.job_id + '/clean';
         }
-        if (job['tts_' + targetLang] || job.tts_vi) {
-            const tLang = job['tts_' + targetLang] ? targetLang : 'vi';
+        if (job['tts_' + targetLang]?.path || job.tts_vi?.path) {
+            const tLang = job['tts_' + targetLang]?.path ? targetLang : 'vi';
             dlTts.style.display = 'inline-flex';
             dlTts.href = '/api/download-audio/' + job.job_id + '/' + tLang;
         }
-        if (job['burn_' + targetLang] || job.burn_vi) {
-            const tLang = job['burn_' + targetLang] ? targetLang : 'vi';
+        if (job['burn_' + targetLang]?.path || job.burn_vi?.path) {
+            const tLang = job['burn_' + targetLang]?.path ? targetLang : 'vi';
             dlFinal.style.display = 'inline-flex';
             dlFinal.href = '/api/download-burned-video/' + job.job_id + '/' + tLang;
         }
@@ -2472,16 +2606,33 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
                 ...extraParams
             };
 
-            const initRes = await fetch('/api/upload/init', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(initPayload)
-            });
-            const initData = await initRes.json();
-            if (!initRes.ok) {
-                throw new Error(initData.error || 'Khoi tao phien upload that bai');
+            const resumeKey = 'studio-upload:' + JSON.stringify([file.name, file.size, file.lastModified, uploadType, extraParams]);
+            let initData = null;
+            let receivedChunks = new Set();
+            let prior;
+            try { prior = localStorage.getItem(resumeKey); } catch (_) {}
+            if (prior) {
+                const response = await fetch('/api/upload/session/' + prior);
+                if (response.ok) {
+                    const session = await response.json();
+                    if (session.finished_response) {
+                        try { localStorage.removeItem(resumeKey); } catch (_) {}
+                        return session.finished_response;
+                    }
+                    initData = session;
+                    receivedChunks = new Set(session.received_chunks);
+                }
+            }
+            if (!initData) {
+                const initRes = await fetch('/api/upload/init', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(initPayload)
+                });
+                initData = await initRes.json();
+                if (!initRes.ok) throw new Error(initData.error || 'Không khởi tạo được upload');
             }
             const jobId = initData.job_id;
+            try { localStorage.setItem(resumeKey, jobId); } catch (_) {}
 
             // Step 2: Upload tung chunk kem co che tu dong retry 3 lan
             const startTime = Date.now();
@@ -2493,6 +2644,7 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
                 const chunkBlob = file.slice(start, end);
                 const currentChunkBytes = end - start;
 
+                if (receivedChunks.has(chunkIndex)) { uploadedBytes += currentChunkBytes; continue; }
                 let success = false;
                 let lastErr = null;
                 for (let attempt = 1; attempt <= 3; attempt++) {
@@ -2545,6 +2697,7 @@ document.body.innerHTML = '<div style="display:flex; height:100vh; align-items:c
                 throw new Error(finishData.error || 'Ghep file va bat dau tien trinh that bai');
             }
 
+            try { localStorage.removeItem(resumeKey); } catch (_) {}
             return finishData;
         }
 
@@ -2732,10 +2885,10 @@ function uploadWithProgress(url, formData, onProgress) {
                     document.getElementById('progressFill').style.background = 'linear-gradient(90deg, #a78bfa, #8b5cf6)';
                 }
 
-                if (data.status === 'done') {
+                if (data.status === 'done' || data.status === 'partial') {
                     clearInterval(pollInterval);
                     showResult(data);
-                } else if (data.status === 'error') {
+                } else if (['error', 'cancelled', 'interrupted'].includes(data.status)) {
                     clearInterval(pollInterval);
                     document.getElementById('progressSection').classList.remove('show');
                     document.getElementById('uploadCard').style.display = 'block';
@@ -3487,6 +3640,8 @@ function uploadWithProgress(url, formData, onProgress) {
         }
 
         function resetAll() {
+        try { localStorage.removeItem('studio-current-job'); } catch (_) {}
+        StudioReviewEditor.complete();
             currentJobId = null;
             selectedFile = null;
             resultData = null;
@@ -4092,11 +4247,11 @@ function uploadWithProgress(url, formData, onProgress) {
                     document.getElementById('srtTtsProgressFill').style.width = prog + '%';
                     document.getElementById('srtTtsProgressText').textContent = msg;
 
-                    if (data.status === 'done' || (data.srt_to_tts_result && data.srt_to_tts_result.status === 'done')) {
+                    if (['done', 'partial'].includes(data.status) || (data.srt_to_tts_result && ['done', 'partial'].includes(data.srt_to_tts_result.status))) {
                         clearInterval(srtToTtsPollInterval);
                         srtToTtsPollInterval = null;
                         onSrtToTtsComplete(jobId, data);
-                    } else if (data.status === 'error') {
+                    } else if (['error', 'cancelled', 'interrupted'].includes(data.status)) {
                         clearInterval(srtToTtsPollInterval);
                         srtToTtsPollInterval = null;
                         alert('Có lỗi xảy ra: ' + (data.message || 'Lỗi không xác định'));
@@ -4189,7 +4344,173 @@ function uploadWithProgress(url, formData, onProgress) {
         }
     
 
+        let batchFolderId = null;
+        let batchFolderPoll = null;
+
+        let batchDetectedRegion = null;
+
+        function toggleBatchRegionMode() {
+            const manual = document.getElementById('batchRegionMode').value === 'manual';
+            document.getElementById('batchManualRegionPanel').style.display = manual ? 'block' : 'none';
+            document.getElementById('batchAutoRegionPanel').style.display = manual ? 'none' : 'block';
+        }
+
+        function getBatchManualRegion() {
+            const values = ['X','Y','W','H'].map(key => Number(document.getElementById('batchRegion' + key).value));
+            const [x, y, w, h] = values;
+            if (!values.every(Number.isFinite) || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > 100.0001 || y + h > 100.0001) {
+                throw new Error('Vùng phụ đề không hợp lệ: X + rộng và Y + cao phải nằm trong 0–100%.');
+            }
+            return {x_ratio:x/100, y_ratio:y/100, w_ratio:w/100, h_ratio:h/100};
+        }
+
+        function setBatchManualRegion(region) {
+            document.getElementById('batchRegionX').value = (region.x_ratio * 100).toFixed(1);
+            document.getElementById('batchRegionY').value = (region.y_ratio * 100).toFixed(1);
+            document.getElementById('batchRegionW').value = (region.w_ratio * 100).toFixed(1);
+            document.getElementById('batchRegionH').value = (region.h_ratio * 100).toFixed(1);
+            updateBatchRegionOverlay(region);
+        }
+
+        function updateBatchRegionOverlay(region) {
+            const overlay = document.getElementById('batchRegionOverlay');
+            const image = document.getElementById('batchRegionPreviewImage');
+            if (!region || !image.src) { overlay.style.display = 'none'; return; }
+            overlay.style.display = 'block';
+            overlay.style.left = `${region.x_ratio * 100}%`;
+            overlay.style.top = `${region.y_ratio * 100}%`;
+            overlay.style.width = `${region.w_ratio * 100}%`;
+            overlay.style.height = `${region.h_ratio * 100}%`;
+        }
+
+        function initBatchRegionSelector() {
+            const canvas = document.getElementById('batchRegionPreviewCanvas');
+            const image = document.getElementById('batchRegionPreviewImage');
+            if (!canvas || canvas.dataset.selectorReady) return;
+            canvas.dataset.selectorReady = '1';
+            let start = null;
+            const point = event => {
+                const rect = image.getBoundingClientRect();
+                return {
+                    x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+                    y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
+                };
+            };
+            canvas.addEventListener('pointerdown', event => {
+                if (document.getElementById('batchRegionMode').value !== 'manual' || !image.clientWidth) return;
+                start = point(event);
+                canvas.setPointerCapture(event.pointerId);
+                event.preventDefault();
+            });
+            canvas.addEventListener('pointermove', event => {
+                if (!start) return;
+                const current = point(event);
+                const region = {
+                    x_ratio: Math.min(start.x, current.x),
+                    y_ratio: Math.min(start.y, current.y),
+                    w_ratio: Math.max(0.01, Math.abs(current.x - start.x)),
+                    h_ratio: Math.max(0.01, Math.abs(current.y - start.y))
+                };
+                setBatchManualRegion(region);
+            });
+            const finish = event => {
+                if (!start) return;
+                start = null;
+                try { canvas.releasePointerCapture(event.pointerId); } catch (_) {}
+            };
+            canvas.addEventListener('pointerup', finish);
+            canvas.addEventListener('pointercancel', finish);
+            image.addEventListener('load', () => {
+                const region = document.getElementById('batchRegionMode').value === 'manual'
+                    ? getBatchManualRegion()
+                    : batchDetectedRegion;
+                updateBatchRegionOverlay(region);
+            });
+        }
+
+        async function previewBatchRegion(mode, applyDetected) {
+            const folderPath = document.getElementById('batchFolderPath').value.trim();
+            if (!folderPath) { alert('Hãy nhập đường dẫn thư mục video trước.'); return; }
+            const payload = {folder_path:folderPath, recursive:document.getElementById('batchRecursive').checked, region_mode:mode};
+            if (mode === 'manual') {
+                try { payload.sub_region = getBatchManualRegion(); }
+                catch (error) { alert(error.message); return; }
+            }
+            const status = document.getElementById('batchRegionPreviewStatus');
+            const box = document.getElementById('batchRegionPreviewBox');
+            box.style.display = 'block';
+            status.textContent = mode === 'auto' ? 'Đang tự nhận diện vùng phụ đề...' : 'Đang tạo preview vùng thủ công...';
+            const response = await fetch('/api/batch/region-preview', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+            const data = await response.json();
+            if (!response.ok) { status.textContent = data.error || 'Không tạo được preview'; return; }
+            batchDetectedRegion = data.region;
+            document.getElementById('batchRegionPreviewImage').src = data.preview_url + '?t=' + Date.now();
+            updateBatchRegionOverlay(data.region);
+            status.textContent = `${data.video_name} • ${data.region_method} • X ${(data.region.x_ratio*100).toFixed(1)}% • Y ${(data.region.y_ratio*100).toFixed(1)}% • W ${(data.region.w_ratio*100).toFixed(1)}% • H ${(data.region.h_ratio*100).toFixed(1)}%`;
+            document.getElementById('batchUseDetectedBtn').style.display = mode === 'auto' ? 'inline-block' : 'none';
+            if (applyDetected) applyDetectedBatchRegion();
+        }
+
+        function applyDetectedBatchRegion() {
+            if (!batchDetectedRegion) return;
+            setBatchManualRegion(batchDetectedRegion);
+            document.getElementById('batchRegionMode').value = 'manual';
+            toggleBatchRegionMode();
+        }
+
+        async function runBatchFolder() {
+            const folderPath = document.getElementById('batchFolderPath').value.trim();
+            if (!folderPath) { alert('Hãy nhập đường dẫn thư mục video.'); return; }
+            const payload = {
+                folder_path: folderPath,
+                recursive: document.getElementById('batchRecursive').checked,
+                subtitle_engine: document.getElementById('batchSubtitleEngine').value,
+                translation_mode: document.getElementById('batchTranslationMode').value,
+                old_subtitle_removal: document.getElementById('batchRemovalMode').value,
+                region_mode: document.getElementById('batchRegionMode').value,
+                output_mode: document.getElementById('batchOutputVideo').checked ? 'srt_and_video' : 'srt_only',
+                strict_translation: document.getElementById('batchStrict').checked,
+                skip_existing: document.getElementById('batchSkipExisting').checked,
+                keep_original_audio: true
+            };
+            if (payload.region_mode === 'manual') {
+                try { payload.sub_region = getBatchManualRegion(); }
+                catch (error) { alert(error.message); return; }
+            }
+            const response = await fetch('/api/batch/run', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+            const data = await response.json();
+            if (!response.ok) { alert(data.error || 'Không thể tạo batch'); return; }
+            batchFolderId = data.batch_id;
+            document.getElementById('batchStatusCard').style.display = 'block';
+            pollBatchFolder();
+        }
+
+        async function pollBatchFolder() {
+            if (!batchFolderId) return;
+            const response = await fetch('/api/batch/' + encodeURIComponent(batchFolderId));
+            const data = await response.json();
+            if (!response.ok) { document.getElementById('batchStatusText').textContent = data.error || 'Không đọc được trạng thái batch'; return; }
+            const c = data.counts || {};
+            document.getElementById('batchStatusText').textContent = `Batch ${data.status}: ${c.done || 0}/${c.total || 0} hoàn tất • lỗi ${c.failed || 0} • ${data.overall_progress || 0}%`;
+            document.getElementById('batchProgressBar').style.width = `${data.overall_progress || 0}%`;
+            const rows = (data.items || []).map(item => {
+                const artifacts = item.artifacts || {};
+                const regionText = artifacts.region_method ? ` • vùng: ${artifacts.region_method}` : '';
+                return `<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:5px 0;"><span>${item.relative_path}${regionText}</span><span>${item.status} ${item.progress || 0}%</span></div>`;
+            }).join('');
+            document.getElementById('batchItems').innerHTML = rows;
+            if (!['done','partial','failed','cancelled','error','interrupted'].includes(data.status)) batchFolderPoll = setTimeout(pollBatchFolder, 1500);
+        }
+
+        async function stopBatchFolder() {
+            if (!batchFolderId) return;
+            await fetch('/api/batch/' + encodeURIComponent(batchFolderId) + '/stop', {method:'POST'});
+            pollBatchFolder();
+        }
+
         window.addEventListener('DOMContentLoaded', () => {
+            initBatchRegionSelector();
+            toggleBatchRegionMode();
             const params = new URLSearchParams(window.location.search);
             const tab = params.get('tab') || params.get('mode');
             if (tab === 'srttts' || tab === 'srt-to-tts') {

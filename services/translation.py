@@ -329,13 +329,19 @@ def translate_srt_ai(srt_content: str, target_lang: str, job_id: str, ai_model: 
             parsed_text, parsed_spk = _parse_numbered_result(raw_content, len(batch))
         except Exception as exc:
             print(f"Batch {batch_number} AI translation failed ({exc}); using Google fallback")
+            jobs[job_id].setdefault('translation_provider_warnings', {})[target_lang] = str(exc)[:500]
 
         if len(parsed_text) < len(batch):
+            for offset, text in parsed_text.items():
+                translated_map[start_i + offset] = text
+                speaker_map[start_i + offset] = parsed_spk.get(offset, 'M1')
             missing_offsets = [off for off in range(len(batch)) if off not in parsed_text]
             print(f"  Batch {batch_number} missing {len(missing_offsets)} lines from AI, filling with Google Translate...")
             _fallback_google(batch, translated_map, start_i, target_lang)
             for offset in range(len(batch)):
-                speaker_map[start_i + offset] = "M1"
+                speaker_map.setdefault(start_i + offset, "M1")
+            jobs[job_id].setdefault('translation_fallbacks', {})[target_lang] = (
+                jobs[job_id].get('translation_fallbacks', {}).get(target_lang, []) + [start_i + off + 1 for off in missing_offsets])
         else:
             long_items_in_batch = []
             for offset, text in parsed_text.items():
@@ -381,6 +387,11 @@ def translate_srt_ai(srt_content: str, target_lang: str, job_id: str, ai_model: 
         print(f"Failed to save speakers.json: {exc}")
 
     translated = _rebuild_srt(entries, translated_map)
+    jobs[job_id].setdefault('translation_quality', {})[target_lang] = {
+        'unchanged_segments': [i+1 for i, entry in enumerate(entries)
+                               if translated_map.get(i, entry[2]) == entry[2] and re.search(r'[\u4e00-\u9fff]', entry[2])],
+        'total_segments': len(entries),
+    }
     valid, errors = validate_srt(translated)
     if not valid:
         raise RuntimeError(f"Bản dịch SRT không hợp lệ: {'; '.join(errors[:3])}")
@@ -437,6 +448,11 @@ def translate_srt(srt_content: str, target_lang: str, job_id: str) -> str:
     jobs[job_id]["segment_speakers"] = ["M1"] * len(entries)
 
     translated = _rebuild_srt(entries, translated_map)
+    jobs[job_id].setdefault('translation_quality', {})[target_lang] = {
+        'unchanged_segments': [i+1 for i, entry in enumerate(entries)
+            if translated_map.get(i, entry[2]) == entry[2] and re.search(r'[\u4e00-\u9fff]', entry[2])],
+        'total_segments': len(entries),
+    }
     valid, errors = validate_srt(translated)
     if not valid:
         raise RuntimeError(f"Bản dịch SRT không hợp lệ: {'; '.join(errors[:3])}")

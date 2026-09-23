@@ -58,6 +58,17 @@ OUTPUT_FOLDER = BASE_DIR / "outputs"
 UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
 
+# Batch folder processing is local-only. When configured, every requested
+# folder must be inside one of these roots. An empty value keeps the local
+# desktop behaviour permissive while the Flask API still requires an absolute
+# path and scans only video extensions.
+BATCH_ALLOWED_ROOTS = [
+    Path(value).expanduser().resolve()
+    for value in re.split(r"[;\n]+", os.getenv("BATCH_ALLOWED_ROOTS", ""))
+    if value.strip()
+]
+BATCH_MAX_FILES = int(os.getenv("BATCH_MAX_FILES", "500"))
+
 LANGUAGES = {
     "vi": {"name": "Tiếng Việt", "flag": "🇻🇳"},
     "en": {"name": "English", "flag": "🇺🇸"},
@@ -143,16 +154,26 @@ GPU_SEMAPHORE = threading.Semaphore(max(1, MAX_CONCURRENT_GPU_TASKS))
 
 
 from contextlib import contextmanager
+from services.runtime_state import JobRegistry, TERMINAL, host_lock, valid_job_id
+_gpu_local = threading.local()
 
 @contextmanager
 def acquire_gpu_slot(timeout: float | None = None):
-    """Acquire a slot in GPU semaphore to prevent OOM on RTX 3050 Laptop with deadlock safeguard."""
+    """One host GPU lease, also shared with the Telegram process. Never fail open."""
+    if getattr(_gpu_local, "held", False):
+        yield
+        return
     wait_sec = timeout if timeout is not None else 600
     acquired = GPU_SEMAPHORE.acquire(timeout=wait_sec)
     if not acquired:
-        print("⚠️ [GPU Slot] Timeout waiting for GPU slot, continuing cautiously to avoid deadlock")
+        raise TimeoutError("GPU đang bận; chưa cấp được lượt xử lý. Vui lòng thử lại.")
     try:
-        yield
+        with host_lock("gpu", timeout=wait_sec):
+            _gpu_local.held = True
+            try:
+                yield
+            finally:
+                _gpu_local.held = False
     finally:
         if acquired:
             try:
@@ -160,11 +181,13 @@ def acquire_gpu_slot(timeout: float | None = None):
             except ValueError:
                 pass
 
-jobs: dict[str, dict[str, Any]] = {}
+jobs = JobRegistry()
 _jobs_lock = threading.RLock()
 JOB_MAX_AGE_SECONDS = int(os.getenv("JOB_MAX_AGE_SECONDS", "3600"))
 JOB_MAX_COUNT = int(os.getenv("JOB_MAX_COUNT", "50"))
-FILE_MAX_AGE_SECONDS = int(os.getenv("FILE_MAX_AGE_SECONDS", "14400"))
+FILE_MAX_AGE_SECONDS = int(os.getenv("FILE_MAX_AGE_SECONDS", "86400"))  # legacy/default for uploads
+UPLOAD_FILE_MAX_AGE_SECONDS = int(os.getenv("UPLOAD_FILE_MAX_AGE_SECONDS", str(FILE_MAX_AGE_SECONDS)))
+OUTPUT_FILE_MAX_AGE_SECONDS = int(os.getenv("OUTPUT_FILE_MAX_AGE_SECONDS", str(30 * 24 * 3600)))
 _CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL_SECONDS", "1800"))
 _last_cleanup_time = 0.0
 _cleanup_thread: threading.Thread | None = None
@@ -173,6 +196,8 @@ _cleanup_stop = threading.Event()
 
 def create_job(job_id: str, **fields: Any) -> dict[str, Any]:
     """Create a consistent job record for Web and Telegram callers."""
+    if not valid_job_id(job_id):
+        raise ValueError("job_id không hợp lệ")
     job = {
         "job_id": job_id,
         "status": "queued",
@@ -182,11 +207,12 @@ def create_job(job_id: str, **fields: Any) -> dict[str, Any]:
         "srt_files": {},
         "translate_progress": {},
         "_created_at": time.time(),
+        "_owner_pid": os.getpid(),
         **fields,
     }
     with _jobs_lock:
         jobs[job_id] = job
-    return job
+    return jobs[job_id]
 
 
 def get_job(job_id: str) -> dict[str, Any] | None:
@@ -202,31 +228,27 @@ def cleanup_old_jobs() -> None:
         return
     with _jobs_lock:
         _last_cleanup_time = now
-        expired = [
-            jid for jid, job in jobs.items()
-            if job.get("_created_at") and now - job["_created_at"] > JOB_MAX_AGE_SECONDS
-        ]
-        if len(jobs) > JOB_MAX_COUNT:
-            ordered = sorted(jobs.items(), key=lambda item: item[1].get("_created_at", 0))
-            expired.extend(jid for jid, _ in ordered[: len(jobs) - JOB_MAX_COUNT])
+        snapshots = jobs.snapshots()
+        completed = {jid: job for jid, job in snapshots.items() if job and job.get("status") in TERMINAL
+                     and not any(isinstance(v, dict) and v.get("status") in {"processing", "generating", "queued"} for v in job.values())}
+        expired = [jid for jid, job in completed.items()
+                   if now - (job.get("_completed_at") or job.get("_created_at") or now) > JOB_MAX_AGE_SECONDS]
+        if len(completed) > JOB_MAX_COUNT:
+            ordered = sorted(completed, key=lambda jid: completed[jid].get("_completed_at") or completed[jid].get("_created_at") or now)
+            expired.extend(ordered[:len(completed) - JOB_MAX_COUNT])
         for jid in set(expired):
-            job = jobs.get(jid, {})
-            if job.get("status") not in {
-                "queued", "downloading_video", "extracting", "loading_model",
-                "transcribing", "translating", "processing", "uploading_video",
-                "processing_video", "extracting_hardsub",
-            }:
-                jobs.pop(jid, None)
+            # Keep durable metadata while artifacts are retained; evict RAM only.
+            dict.pop(jobs, jid, None)
         if expired:
             print(f"Cleaned up {len(set(expired))} old job records")
 
 
-def _is_active_path(path: Path) -> bool:
+def _is_active_path(path: Path, active_ids=None) -> bool:
     with _jobs_lock:
-        active_ids = {
-            jid for jid, job in jobs.items()
-            if job.get("status") not in {"done", "error", "cancelled"}
-        }
+        if active_ids is None:
+            active_ids = {jid for jid, job in jobs.snapshots().items() if job and (
+                job.get("status") not in TERMINAL or any(isinstance(v, dict) and v.get("status") in
+                {"processing", "generating", "queued"} for v in job.values()))}
     parts = set(path.parts)
     return any(jid in parts or path.name.startswith(f"{jid}_") for jid in active_ids)
 
@@ -235,20 +257,27 @@ def cleanup_old_files(force: bool = False) -> int:
     """Recursively remove expired artifacts without touching active jobs."""
     now = time.time()
     cleaned = 0
-    for root in (UPLOAD_FOLDER, OUTPUT_FOLDER):
+    active_ids = {jid for jid, job in jobs.snapshots().items() if job and (
+        job.get("status") not in TERMINAL or any(isinstance(v, dict) and v.get("status") in
+        {"processing", "generating", "queued"} for v in job.values()))}
+    retention = {
+        UPLOAD_FOLDER: UPLOAD_FILE_MAX_AGE_SECONDS,
+        OUTPUT_FOLDER: OUTPUT_FILE_MAX_AGE_SECONDS,
+    }
+    for root, max_age in retention.items():
         if not root.exists():
             continue
         for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
             try:
                 if path.is_file():
-                    if not force and now - path.stat().st_mtime <= FILE_MAX_AGE_SECONDS:
+                    if not force and now - path.stat().st_mtime <= max_age:
                         continue
-                    if _is_active_path(path):
+                    if _is_active_path(path, active_ids):
                         continue
                     path.unlink()
                     cleaned += 1
                 elif path.is_dir() and path != root:
-                    if not any(path.iterdir()) and (force or now - path.stat().st_mtime > FILE_MAX_AGE_SECONDS):
+                    if not any(path.iterdir()) and (force or now - path.stat().st_mtime > max_age):
                         path.rmdir()
             except (OSError, PermissionError):
                 continue

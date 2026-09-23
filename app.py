@@ -3,6 +3,8 @@
 
 from flask import Flask, jsonify
 
+print("Starting Web Studio: loading configuration...", flush=True)
+
 from config import (
     MAX_UPLOAD_BYTES,
     OUTPUT_FOLDER,

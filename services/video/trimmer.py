@@ -15,7 +15,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from config import DEVICE
+from config import DEVICE, acquire_gpu_slot
 from services.srt_utils import format_timestamp, parse_srt_timing
 
 _CHINESE_CHAR_RE = re.compile(r"[\u4e00-\u9fff]")
@@ -32,7 +32,8 @@ def get_ocr_reader():
                 try:
                     import easyocr
                     use_gpu = (DEVICE == "cuda")
-                    _ocr_reader = easyocr.Reader(['ch_sim'], gpu=use_gpu, verbose=False)
+                    with acquire_gpu_slot():
+                        _ocr_reader = easyocr.Reader(['ch_sim'], gpu=use_gpu, verbose=False)
                 except Exception as exc:
                     print(f"Warning: EasyOCR reader initialization failed ({exc})")
                     _ocr_reader = False
@@ -50,7 +51,8 @@ def inspect_chinese_text(frame: np.ndarray) -> tuple[bool, int, str]:
         h, w = frame.shape[:2]
         crop_h = int(h * 0.70)
         crop = frame[:crop_h, :]
-        results = reader.readtext(crop, paragraph=False)
+        with acquire_gpu_slot():
+            results = reader.readtext(crop, paragraph=False)
         all_text = " ".join(item[1] for item in results)
         chars = _CHINESE_CHAR_RE.findall(all_text)
         return len(chars) >= 2, len(chars), all_text

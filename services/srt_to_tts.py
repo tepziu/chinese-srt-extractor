@@ -13,6 +13,8 @@ với các nguyên tắc chuẩn:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import math
 import json
 import os
 import re
@@ -38,6 +40,7 @@ from config import (
 )
 from services.google_tts import synthesize_to_wav
 from services.srt_utils import format_timestamp, parse_srt
+from services.runtime_state import serial_task
 
 _SPEAKER_RE = re.compile(r"^\s*(?:\[|\()([A-Za-z0-9_]+)(?:\]|\))\s*:?\s*", re.IGNORECASE)
 _HTML_TAG_RE = re.compile(r"<[^>]+>|\{[^}]+\}")
@@ -192,167 +195,76 @@ def speed_adjust_audio(
     return audio, 1.0
 
 
-def align_srt_to_tts_timeline(
-    segments: list[dict[str, Any]],
-    segment_audios: list[AudioSegment | None],
-    options: dict[str, Any] | None = None,
-    temp_dir: Path | None = None,
-) -> tuple[AudioSegment, list[dict[str, Any]], str, int]:
+def align_srt_to_tts_timeline(segments, segment_audios, options=None, temp_dir=None):
+    """Place complete speech without overlap; report overflow instead of cutting words.
+
+    PCM is copied once per segment into a mutable master buffer, avoiding a full
+    AudioSegment.overlay copy for every sentence (quadratic work on long videos).
     """
-    Thuật toán cốt lõi: Căn chỉnh timeline, chống chồng chéo tuyệt đối và khớp thời lượng phụ đề.
-
-    Cam kết:
-    1. Zero Overlap: Mọi câu thứ i kết thúc dứt khoát trước câu i+1 ít nhất `safety_margin_ms`.
-    2. Duration Matching: Tổng độ dài master audio bằng chính thời lượng phụ đề
-       max(segments[-1].end_ms, last_audio_end).
-    3. Đủ ý & Tự nhiên: Cắt tỉa khoảng lặng thừa, tận dụng khoảng nghỉ giữa 2 câu
-       để không phải tăng tốc quá mức khi câu hơi dài; nếu câu quá dài, tự động tăng tốc
-       mượt mà bằng atempo.
-    4. Aligned SRT: Sinh ra chuỗi phụ đề SRT mới khớp chính xác 100% với giọng đọc thực tế.
-    """
-    opts = options or {}
-    safety_margin_ms = int(opts.get("safety_margin_ms", 60))
-    align_mode = opts.get("align_mode", "smart_sync")
-    max_speed_ratio = float(opts.get("max_speed_ratio", 1.65))
-    allow_borrow = bool(opts.get("allow_borrow_preceding", True)) and align_mode == "smart_sync"
-    target_total_duration_ms = opts.get("target_duration_ms")
-
-    sub_end_ms = segments[-1]["end_ms"] if segments else 0
-    init_total_ms = max(sub_end_ms + 1000, int(target_total_duration_ms or 0) + 1000)
-    final_audio = AudioSegment.silent(duration=init_total_ms)
-
-    last_speech_end = 0
-    segment_results: list[dict[str, Any]] = []
-
+    from services.pipeline_options import validate_tts_options
+    opts = validate_tts_options(options)
+    margin = opts['safety_margin_ms']
+    mode = opts.get('align_mode', 'smart_sync')
+    sub_end = max((s['end_ms'] for s in segments), default=0)
+    pcm = bytearray()
+    last_end = 0
+    placed = False
+    results = []
+    aligned = []
     for i, seg in enumerate(segments):
-        raw_audio = segment_audios[i] if i < len(segment_audios) else None
-        if raw_audio is None:
-            segment_results.append({
-                "index": seg["index"],
-                "text": seg["text"],
-                "speaker": seg.get("speaker"),
-                "orig_start_ms": seg["start_ms"],
-                "orig_end_ms": seg["end_ms"],
-                "orig_duration_ms": seg["duration_ms"],
-                "actual_start_ms": seg["start_ms"],
-                "actual_end_ms": seg["end_ms"],
-                "actual_duration_ms": 0,
-                "raw_duration_ms": 0,
-                "speed_factor": 1.0,
-                "status": "failed",
-                "overlap_ms": 0,
-            })
+        if opts.get('cancelled_cb') and opts['cancelled_cb']():
+            raise RuntimeError('Đã hủy quá trình căn chỉnh TTS')
+        raw = segment_audios[i] if i < len(segment_audios) else None
+        row = dict(index=seg['index'], text=seg['text'], speaker=seg.get('speaker'),
+                   orig_start_ms=seg['start_ms'], orig_end_ms=seg['end_ms'],
+                   orig_duration_ms=seg['duration_ms'], raw_duration_ms=0,
+                   actual_start_ms=seg['start_ms'], actual_end_ms=seg['end_ms'],
+                   actual_duration_ms=0, speed_factor=1.0, overlap_ms=0,
+                   timing_overflow_ms=0, status='failed')
+        if raw is None or len(raw) == 0:
+            results.append(row)
             continue
-
-        trimmed_audio = trim_silence_padding(raw_audio)
-        curr_len = len(trimmed_audio)
-        orig_start = seg["start_ms"]
-        orig_end = seg["end_ms"]
-        orig_dur = seg["duration_ms"]
-        next_start = segments[i + 1]["start_ms"] if i + 1 < len(segments) else orig_end + 2000
-
-        # Xác định điểm bắt đầu an toàn (actual_start)
-        if orig_start < last_speech_end + safety_margin_ms:
-            # Nếu câu trước kéo dài hoặc SRT gốc bị lệch: đẩy mốc bắt đầu lên sau câu trước
-            actual_start = last_speech_end + safety_margin_ms
-        else:
-            if allow_borrow and orig_start > last_speech_end + safety_margin_ms + 80:
-                pre_gap = orig_start - (last_speech_end + safety_margin_ms)
-                if curr_len > orig_dur:
-                    # Mượn một phần khoảng tĩnh phía trước để câu nói dài có thêm thời gian phát âm
-                    borrow = min(pre_gap, 350, curr_len - orig_dur)
-                    actual_start = orig_start - borrow
-                else:
-                    actual_start = orig_start
-            else:
-                actual_start = orig_start
-
-        # Giới hạn mốc kết thúc tối đa cho phép để không bao giờ đè lên câu sau
-        max_allowed_end = next_start - safety_margin_ms
-        max_allowed_dur = max(100, max_allowed_end - actual_start)
-
-        # Quyết định tốc độ phát âm
-        if align_mode == "strict_sub":
-            target_dur = min(orig_dur, max_allowed_dur)
-        else:
-            target_dur = max_allowed_dur
-
-        if curr_len <= target_dur:
-            adjusted_audio = trimmed_audio
-            speed_factor = 1.0
-            status = "natural_fit" if curr_len <= orig_dur else "gap_fit"
-        else:
-            adjusted_audio, speed_factor = speed_adjust_audio(
-                trimmed_audio,
-                target_dur,
-                temp_dir=temp_dir,
-                max_speed=max_speed_ratio,
-            )
-            status = "speed_adjusted"
-
-        # Chốt chặn bảo vệ chống va chạm tuyệt đối (Hard Anti-Collision Guarantee)
-        if len(adjusted_audio) > max_allowed_dur:
-            adjusted_audio = adjusted_audio[:max_allowed_dur]
-            status = "speed_adjusted_clamped"
-
-        actual_end = actual_start + len(adjusted_audio)
-        if actual_end > max_allowed_end:
-            actual_end = max_allowed_end
-            adjusted_audio = adjusted_audio[:max(10, actual_end - actual_start)]
-
-        # Đảm bảo master audio đủ dài trước khi overlay
-        needed_len = actual_end + 1000
-        if len(final_audio) < needed_len:
-            final_audio = final_audio + AudioSegment.silent(duration=needed_len - len(final_audio) + 5000)
-
-        # Overlay đoạn thoại vào master track
-        final_audio = final_audio.overlay(adjusted_audio, position=actual_start)
-        last_speech_end = actual_end
-
-        segment_results.append({
-            "index": seg["index"],
-            "text": seg["text"],
-            "speaker": seg.get("speaker"),
-            "orig_start_ms": orig_start,
-            "orig_end_ms": orig_end,
-            "orig_duration_ms": orig_dur,
-            "actual_start_ms": actual_start,
-            "actual_end_ms": actual_end,
-            "actual_duration_ms": len(adjusted_audio),
-            "raw_duration_ms": curr_len,
-            "speed_factor": round(speed_factor, 2),
-            "status": status,
-            "overlap_ms": 0,
-        })
-
-    # Tính toán tổng thời lượng chuẩn xác của file audio đầu ra
-    if target_total_duration_ms and int(target_total_duration_ms) > 0:
-        total_duration_ms = max(int(target_total_duration_ms), last_speech_end)
-    else:
-        total_duration_ms = max(sub_end_ms, last_speech_end)
-
-    if len(final_audio) < total_duration_ms:
-        final_audio = final_audio + AudioSegment.silent(duration=total_duration_ms - len(final_audio))
-    else:
-        final_audio = final_audio[:total_duration_ms]
-
-    # Tạo nội dung SRT đã đồng bộ với giọng nói thực tế
-    aligned_lines = []
-    for item in segment_results:
-        if item["status"] == "failed":
+        audio = trim_silence_padding(raw).set_frame_rate(24000).set_channels(1).set_sample_width(2)
+        if len(audio) == 0:
+            results.append(row)
             continue
-        start_ts = format_timestamp(item["actual_start_ms"] / 1000.0)
-        end_ts = format_timestamp(item["actual_end_ms"] / 1000.0)
-        spk_tag = f"[{item['speaker']}] " if item.get("speaker") else ""
-        aligned_lines.extend([
-            str(item["index"]),
-            f"{start_ts} --> {end_ts}",
-            f"{spk_tag}{item['text']}",
-            "",
-        ])
-    aligned_srt_content = "\n".join(aligned_lines)
-
-    return final_audio, segment_results, aligned_srt_content, total_duration_ms
+        raw_duration = len(audio)
+        safe_start = last_end + margin if placed else 0
+        start = max(seg['start_ms'], safe_start)
+        if mode == 'smart_sync' and opts.get('allow_borrow_preceding', True) and len(audio) > seg['duration_ms']:
+            start -= min(max(0, start-safe_start), 350, len(audio)-seg['duration_ms'])
+        end_limit = (segments[i+1]['start_ms']-margin) if i+1 < len(segments) else seg['end_ms']
+        if mode == 'strict_sub':
+            end_limit = min(end_limit, seg['end_ms'])
+        available = max(1, end_limit-start)
+        speed = 1.0
+        if len(audio) > available:
+            audio, speed = speed_adjust_audio(audio, available, temp_dir=temp_dir, max_speed=opts['max_speed_ratio'])
+        audio = audio.set_frame_rate(24000).set_channels(1).set_sample_width(2)
+        end = start + math.ceil(len(audio.raw_data) / 48)
+        overflow = max(0, end-end_limit)
+        # At most codec rounding tolerance; any larger spill must be reviewed.
+        status = 'timing_overflow' if overflow > 25 else ('speed_adjusted' if speed > 1 else 'natural_fit')
+        offset = start * 48  # 24 kHz, mono, signed 16-bit PCM
+        needed = offset + len(audio.raw_data)
+        if len(pcm) < needed:
+            pcm.extend(b'\0' * (needed-len(pcm)))
+        pcm[offset:needed] = audio.raw_data
+        row.update(actual_start_ms=start, actual_end_ms=end, actual_duration_ms=len(audio),
+                   raw_duration_ms=raw_duration, speed_factor=round(speed, 3), status=status,
+                   overlap_ms=max(0, last_end-start) if placed else 0, timing_overflow_ms=overflow)
+        results.append(row)
+        aligned.extend([str(len(aligned)//4+1),
+                        f"{format_timestamp(start/1000)} --> {format_timestamp(end/1000)}",
+                        seg['text'], ''])
+        last_end = end
+        placed = True
+    duration = max(sub_end, last_end, int(opts.get('target_duration_ms') or 0))
+    needed = duration * 48
+    if len(pcm) < needed:
+        pcm.extend(b'\0' * (needed-len(pcm)))
+    final = AudioSegment(data=bytes(pcm), sample_width=2, frame_rate=24000, channels=1)
+    return final, results, '\n'.join(aligned), len(final)
 
 
 def _resolve_voice(engine: str, lang: str, speaker_id: str | None, custom_voice: str | None = None, custom_map: dict | None = None) -> tuple[str, str]:
@@ -394,12 +306,16 @@ async def synthesize_edge_segment(
             return False
         try:
             communicate = edge_tts.Communicate(text, voice, pitch=pitch)
-            await communicate.save(str(out_path))
-            if out_path.exists() and out_path.stat().st_size > 0:
+            staging = out_path.with_suffix('.part.mp3')
+            await communicate.save(str(staging))
+            if staging.exists() and staging.stat().st_size > 0:
+                os.replace(staging, out_path)
                 return True
         except Exception as exc:
             if attempt < 3:
                 await asyncio.sleep(1 + attempt * 1.5)
+        finally:
+            out_path.with_suffix('.part.mp3').unlink(missing_ok=True)
     return False
 
 
@@ -426,6 +342,14 @@ def synthesize_all_segments(
     total = len(segments)
     audio_segments: list[AudioSegment | None] = [None] * total
 
+    def cache_path(seg, voice, style, suffix):
+        from services.google_tts import load_google_tts_settings
+        model = load_google_tts_settings().model if engine == 'gemini' else 'edge-v1'
+        data = [seg['text'], lang, engine, model, voice, style, (options or {}).get('style_prompt', ''),
+                seg['index'] > 1 if engine == 'gemini' else False]
+        digest = hashlib.sha256(json.dumps(data, ensure_ascii=False).encode('utf-8')).hexdigest()[:24]
+        return temp_dir / f'seg_{digest}.{suffix}'
+
     if engine == "edge":
         async def run_edge():
             batch_size = 3
@@ -438,7 +362,7 @@ def synthesize_all_segments(
                     seg = segments[idx]
                     spk = seg.get("speaker") or "M1"
                     v, p = _resolve_voice("edge", lang, spk, custom_voice, speaker_voices)
-                    out_f = temp_dir / f"seg_{idx:04d}_{spk}.mp3"
+                    out_f = cache_path(seg, v, p, 'mp3')
                     tasks.append((idx, out_f, synthesize_edge_segment(seg["text"], v, p, out_f, cancelled_cb)))
 
                 sub_results = await asyncio.gather(*[t[2] for t in tasks])
@@ -447,6 +371,7 @@ def synthesize_all_segments(
                         try:
                             audio_segments[idx] = AudioSegment.from_mp3(str(out_f))
                         except Exception:
+                            out_f.unlink(missing_ok=True)
                             audio_segments[idx] = None
 
                 if progress_cb:
@@ -468,36 +393,48 @@ def synthesize_all_segments(
                 break
             spk = seg.get("speaker") or "M1"
             v, emotion = _resolve_voice("gemini", lang, spk, custom_voice, speaker_voices)
-            out_f = temp_dir / f"seg_{idx:04d}_{spk}.wav"
+            out_f = cache_path(seg, v, emotion, 'wav')
             if not out_f.exists() or out_f.stat().st_size == 0:
                 try:
+                    staging = out_f.with_suffix('.part.wav')
                     synthesize_to_wav(
-                        seg["text"], out_f, lang=lang, voice=v, emotion=emotion,
+                        seg["text"], staging, lang=lang, voice=v, emotion=emotion,
                         style_prompt=style_prompt, continuation=idx > 0,
                         cancelled=cancelled_cb,
                     )
+                    os.replace(staging, out_f)
                 except Exception as exc:
                     print(f"[Gemini TTS] Đoạn {idx} lỗi: {exc}")
+                finally:
+                    out_f.with_suffix('.part.wav').unlink(missing_ok=True)
 
             if out_f.exists() and out_f.stat().st_size > 0:
                 try:
                     audio_segments[idx] = AudioSegment.from_wav(str(out_f))
                 except Exception:
+                    out_f.unlink(missing_ok=True)
                     audio_segments[idx] = None
 
             if progress_cb:
                 progress_cb(int((idx + 1) / total * 70), f"Gemini đang tạo giọng: {idx + 1}/{total}")
 
+    elif engine == 'omnivoice':
+        from services.tts import generate_omnivoice_audio
+        job_id = (options or {}).get('job_id')
+        if not job_id:
+            raise ValueError('OmniVoice cần job context')
+        paths = generate_omnivoice_audio(job_id, lang,
+            [(s['start_ms'], s['end_ms'], s['text']) for s in segments], total, temp_dir, f'tts_{lang}')
+        for idx, path in enumerate(paths):
+            if path:
+                audio_segments[idx] = AudioSegment.from_wav(path)
     else:
-        # Fallback to Edge TTS
-        return synthesize_all_segments(
-            segments, lang, "edge", custom_voice, speaker_voices,
-            temp_dir, progress_cb, cancelled_cb, options
-        )
+        raise ValueError('Engine TTS không được hỗ trợ')
 
     return audio_segments
 
 
+@serial_task
 def process_srt_to_tts(
     srt_content: str,
     lang: str = "vi",
@@ -507,6 +444,7 @@ def process_srt_to_tts(
     job_id: str | None = None,
     output_dir: Path | None = None,
     output_audio_path: Path | str | None = None,
+    manage_status: bool = True,
 ) -> dict[str, Any]:
     """
     Toàn bộ luồng xử lý: Từ file SRT sang audio MP3 timeline-synced và aligned SRT.
@@ -531,7 +469,13 @@ def process_srt_to_tts(
     temp_dir = UPLOAD_FOLDER / job_id / "seg_cache"
     temp_dir.mkdir(parents=True, exist_ok=True)
 
-    opts = options or {}
+    from services.pipeline_options import validate_tts_options
+    opts = validate_tts_options(options)
+    opts['job_id'] = job_id
+    speakers = opts.get('segment_speakers') or jobs.get(job_id, {}).get('segment_speakers') or []
+    for idx, segment in enumerate(segments):
+        if not segment.get('speaker') and idx < len(speakers):
+            segment['speaker'] = speakers[idx]
     tts_key = f"tts_{lang}"
 
     def _mark(prog: int, msg: str):
@@ -543,6 +487,10 @@ def process_srt_to_tts(
 
     def _is_cancelled() -> bool:
         return bool(jobs.get(job_id, {}).get("cancel"))
+
+    if _is_cancelled():
+        raise RuntimeError('Đã hủy quá trình tạo thuyết minh')
+    opts['cancelled_cb'] = _is_cancelled
 
     _mark(5, "Đang khởi tạo TTS cho phụ đề...")
 
@@ -561,6 +509,8 @@ def process_srt_to_tts(
 
     if _is_cancelled():
         raise RuntimeError("Đã hủy quá trình tạo thuyết minh")
+    if not any(audio is not None and len(audio) for audio in segment_audios):
+        raise RuntimeError('Không tạo được đoạn giọng đọc nào; không xuất audio im lặng')
 
     _mark(75, "Đang tính toán timeline chống chồng chéo...")
 
@@ -589,11 +539,12 @@ def process_srt_to_tts(
 
     file_size = out_audio_path.stat().st_size
     failures = [r["index"] for r in seg_results if r["status"] == "failed"]
+    needs_review = [r['index'] for r in seg_results if r['status'] == 'timing_overflow']
     speed_adjusted_count = sum(1 for r in seg_results if "speed_adjusted" in r["status"])
 
     sub_end_ms = segments[-1]["end_ms"]
     res_dict = {
-        "status": "done" if not failures else "partial",
+        "status": "partial" if failures or needs_review else "done",
         "job_id": job_id,
         "lang": lang,
         "lang_name": lang_name,
@@ -610,19 +561,28 @@ def process_srt_to_tts(
         "total_segments": len(segments),
         "speed_adjusted_segments": speed_adjusted_count,
         "failed_segments": failures,
+        "needs_review_segments": needs_review,
+        "overlap_ms": sum(r['overlap_ms'] for r in seg_results),
+        "clipped_segments": [],
         "segments": seg_results,
         "aligned_srt_preview": aligned_srt[:1200],
     }
 
-    final_status = "done" if not failures else "partial"
+    final_status = "partial" if failures or needs_review else "done"
     status_msg = (
         f"Hoàn thành ({file_size / 1048576:.1f}MB, {len(segments)} câu, 0% chồng chéo)"
         if not failures
         else f"Hoàn thành một phần ({file_size / 1048576:.1f}MB • thiếu {len(failures)}/{len(segments)} đoạn)"
     )
+    if needs_review:
+        status_msg += f' • {len(needs_review)} câu cần chỉnh thời gian (đã giữ đủ lời)'
+    from services.srt_utils import validate_srt
+    if aligned_srt and not validate_srt(aligned_srt)[0]:
+        raise RuntimeError('Phụ đề sau căn chỉnh không hợp lệ')
     _mark(100, status_msg)
     if job_id in jobs:
-        jobs[job_id]["status"] = final_status
+        if manage_status:
+            jobs[job_id]["status"] = final_status
         jobs[job_id][tts_key] = {
             "status": final_status,
             "progress": 100,
@@ -632,6 +592,7 @@ def process_srt_to_tts(
             "size": file_size,
             "duration": round(total_dur_ms / 1000.0, 1),
             "failed_segments": failures,
+            "needs_review_segments": needs_review,
             "total_segments": len(segments),
         }
         jobs[job_id]["aligned_srt"] = {
@@ -639,6 +600,10 @@ def process_srt_to_tts(
             "filename": out_srt_path.name,
         }
         jobs[job_id]["srt_to_tts_result"] = res_dict
+        if hasattr(jobs[job_id], 'persist'):
+            jobs[job_id].persist()
+
+    (output_dir / f'tts_manifest_{lang}.json').write_text(json.dumps(res_dict, ensure_ascii=False, indent=2), encoding='utf-8')
 
     return res_dict
 

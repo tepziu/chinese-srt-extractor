@@ -13,6 +13,7 @@ import urllib.request
 from pathlib import Path
 
 from config import OUTPUT_FOLDER, UPLOAD_FOLDER, create_job, get_job, jobs
+from services.runtime_state import serial_task
 from services.douyin_monitor.channel_manager import (
     get_notify_chat_id,
     mark_as_downloaded,
@@ -120,7 +121,8 @@ def send_telegram_document(file_path: str, caption: str = "", chat_id: str | Non
         return False
 
 
-def execute_auto_pipeline(work: dict, channel_cfg: dict, video_path: str) -> None:
+@serial_task
+def execute_auto_pipeline(work: dict, channel_cfg: dict, video_path: str) -> dict:
     """Execute the end-to-end studio pipeline for a newly discovered Douyin video."""
     aweme_id = str(work.get("aweme_id", ""))
     title = work.get("desc", "Video không tiêu đề")
@@ -174,9 +176,13 @@ def execute_auto_pipeline(work: dict, channel_cfg: dict, video_path: str) -> Non
         )
 
     if not auto_burn:
+        create_job(job_id, status='done', video_path=target_video,
+                   delivery_status='delivered' if sent_master else 'pending',
+                   delivery_path=target_video, delivery_caption=f'Video gốc: {title[:120]}',
+                   delivery_attempts=1, delivery_next_attempt=time.time()+3600)
         mark_as_downloaded(aweme_id)
         print(f"🎉 [AUTO STUDIO] Video downloaded and delivered for {aweme_id} (auto_burn=False)!")
-        return
+        return {'status': 'downloaded', 'path': target_video}
 
     try:
         from services.burn_sub import burn_sub_video
@@ -191,7 +197,7 @@ def execute_auto_pipeline(work: dict, channel_cfg: dict, video_path: str) -> Non
             video_path=target_video,
             translate_langs=[target_lang],
             translation_mode=style,
-            trim_intro="auto",
+            trim_intro="off",
         )
         jobs[job_id]["video_file"] = {
             "path": target_video,
@@ -219,18 +225,23 @@ def execute_auto_pipeline(work: dict, channel_cfg: dict, video_path: str) -> Non
             translate_langs=[target_lang],
             translate_method="ai",
             translation_mode=style,
+            manage_status=False,
         )
 
         job_state = get_job(job_id)
-        if not job_state or job_state.get("status") == "error":
+        if not job_state or job_state.get("status") in {"error", "cancelled", "partial"}:
             err_msg = job_state.get("message", "Lỗi không xác định") if job_state else "Job lost"
             send_telegram_message(f"❌ Xử lý video `{aweme_id}` thất bại tại bước nhận dạng/dịch: {err_msg}")
-            return
+            raise RuntimeError(err_msg)
 
         srt_files = job_state.get("srt_files") or {}
         srt_info = srt_files.get(target_lang) or {}
         srt_path = srt_info.get("path") if isinstance(srt_info, dict) else ""
         srt_content = Path(srt_path).read_text(encoding="utf-8") if srt_path and os.path.exists(srt_path) else ""
+        if not srt_content:
+            raise RuntimeError('Không tạo được phụ đề đích')
+        if job_state.get('translation_quality', {}).get(target_lang, {}).get('unchanged_segments'):
+            raise RuntimeError('Bản dịch còn câu chưa dịch; cần kiểm tra')
 
         # Step 3: Generate TTS Voiceover
         tts_audio_path = None
@@ -243,8 +254,14 @@ def execute_auto_pipeline(work: dict, channel_cfg: dict, video_path: str) -> Non
                     engine="edge",
                 )
                 tts_audio_path = tts_res.get("path") if isinstance(tts_res, dict) else None
+                if tts_res.get('status') != 'done':
+                    raise RuntimeError('TTS còn đoạn cần kiểm tra')
+                aligned = jobs[job_id].get('aligned_srt', {}).get('path')
+                if aligned and Path(aligned).is_file():
+                    srt_content = Path(aligned).read_text(encoding='utf-8')
+                    srt_path = aligned
             except Exception as tts_err:
-                print(f"[AUTO STUDIO] TTS error (will continue with original audio): {tts_err}")
+                raise RuntimeError(f'TTS chưa hoàn tất: {tts_err}') from tts_err
 
         # Step 4: Burn sub & Inpaint & BGM Mix
         if auto_burn and srt_content:
@@ -269,6 +286,8 @@ def execute_auto_pipeline(work: dict, channel_cfg: dict, video_path: str) -> Non
             )
 
             final_video_path = burn_info.get("path") if isinstance(burn_info, dict) else None
+            if not final_video_path or not os.path.isfile(final_video_path):
+                raise RuntimeError('Render chưa tạo được video thành phẩm')
             if final_video_path and os.path.exists(final_video_path):
                 size_mb = os.path.getsize(final_video_path) / (1024 * 1024)
                 print(f"✅ [AUTO STUDIO] Video completed: {final_video_path} ({size_mb:.1f}MB)")
@@ -298,8 +317,36 @@ def execute_auto_pipeline(work: dict, channel_cfg: dict, video_path: str) -> Non
         # Mark as successfully processed
         mark_as_downloaded(aweme_id)
         print(f"🎉 [AUTO STUDIO] Pipeline finished and delivered for {aweme_id}!")
+        jobs[job_id].update(status='done', delivery_status='delivered' if sent else 'pending',
+                           delivery_path=final_video_path, delivery_caption=caption,
+                           delivery_attempts=1, delivery_next_attempt=time.time()+3600)
+        return {'status': 'done', 'path': final_video_path, 'delivery_status': 'delivered' if sent else 'pending'}
 
     except Exception as exc:
         import traceback
         traceback.print_exc()
         send_telegram_message(f"❌ Xử lý tự động video `{aweme_id}` gặp lỗi: {exc}", parse_mode=None)
+        if get_job(job_id):
+            jobs[job_id].update(status='error', message=str(exc))
+        raise
+
+
+def retry_pending_deliveries():
+    """Retry completed local artifacts without downloading or rendering again."""
+    from services.runtime_state import host_lock
+    with host_lock('douyin-delivery', timeout=0):
+        for jid, job in jobs.snapshots().items():
+            if not jid.startswith('dy_') or job.get('delivery_status') != 'pending':
+                continue
+            if job.get('delivery_next_attempt', 0) > time.time():
+                continue
+            path = Path(job.get('delivery_path', ''))
+            attempts = int(job.get('delivery_attempts', 0))
+            if not path.is_file() or path.stat().st_size > 49.5 * 1024 * 1024 or attempts >= 5:
+                job.update(delivery_status='manual_required')
+                job.persist()
+                continue
+            sent = send_telegram_document(str(path), caption=job.get('delivery_caption', ''), parse_mode=None)
+            job.update(delivery_status='delivered' if sent else 'pending', delivery_attempts=attempts+1,
+                       delivery_next_attempt=time.time()+min(86400, 3600 * 2**attempts))
+            job.persist()

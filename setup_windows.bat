@@ -1,25 +1,38 @@
 @echo off
 chcp 65001 >nul
-title Chinese SRT Extractor - Setup
 cd /d "%~dp0"
-python --version >nul 2>&1 || (echo Python 3.10+ is required.& pause& exit /b 1)
-ffmpeg -version >nul 2>&1 || echo WARNING: install FFmpeg and add it to PATH before running.
-if exist "venv\Scripts\python.exe" (
-    venv\Scripts\python.exe -c "import sys" >nul 2>&1
-    if errorlevel 1 rmdir /s /q venv
+python -c "import sys; assert (3,10) <= sys.version_info[:2] < (3,13)" >nul 2>&1
+if errorlevel 1 (
+    echo Python 3.10-3.12 is required for this pinned audio stack.
+    goto :fail
 )
+ffmpeg -version >nul 2>&1
+if errorlevel 1 (
+    echo Install FFmpeg and add it to PATH first.
+    goto :fail
+)
+ffprobe -version >nul 2>&1
+if errorlevel 1 goto :fail
 if not exist "venv\Scripts\python.exe" python -m venv venv
-call "venv\Scripts\activate.bat"
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+if errorlevel 1 goto :fail
+"venv\Scripts\python.exe" -m pip install --upgrade pip
+if errorlevel 1 goto :fail
 nvidia-smi >nul 2>&1
-if %errorlevel% equ 0 (
-    python -m pip install torch --index-url https://download.pytorch.org/whl/cu121
+if errorlevel 1 (
+    "venv\Scripts\python.exe" -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 ) else (
-    python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+    "venv\Scripts\python.exe" -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 )
+if errorlevel 1 goto :fail
+"venv\Scripts\python.exe" -m pip install -r requirements.txt
+if errorlevel 1 goto :fail
+"venv\Scripts\python.exe" -m pip check
+if errorlevel 1 goto :fail
 if not exist uploads mkdir uploads
 if not exist outputs mkdir outputs
-echo Setup completed. Use start_all.bat to run services.
+echo Setup completed. Use start_all.bat. Logs are in runtime.
+exit /b 0
+:fail
+echo Setup failed. Review the error above; no existing environment was deleted.
 pause
-
+exit /b 1

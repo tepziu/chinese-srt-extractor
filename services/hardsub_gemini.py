@@ -19,6 +19,7 @@ from config import (
     get_gemini_api_key,
 )
 from services.srt_utils import validate_srt
+from services.runtime_state import serial_task
 
 HARDSUB_PROMPT = """You are an expert subtitle extractor. Analyze this video frame by frame and extract ALL hardcoded/burned-in subtitle text that appears on screen.
 
@@ -38,8 +39,29 @@ Subtitle text
 Begin extraction now:"""
 
 
+def _normalize_timestamp(ts: str) -> str:
+    ts = ts.strip().replace(".", ",")
+    parts = ts.split(":")
+    if len(parts) == 2:
+        ts = "00:" + ts
+    elif len(parts) == 3:
+        h, m, s_ms = parts
+        try:
+            ts = f"{int(h):02d}:{int(m):02d}:{s_ms}"
+        except ValueError:
+            pass
+    if "," in ts:
+        time_part, ms_part = ts.split(",", 1)
+        ms_digits = re.match(r"^\d+", ms_part)
+        ms_str = (ms_digits.group(0) + "000")[:3] if ms_digits else "000"
+        ts = f"{time_part},{ms_str}"
+    elif ":" in ts:
+        ts = f"{ts},000"
+    return ts
+
+
 def parse_srt_from_text(text: str) -> str:
-    """Remove markdown wrappers and normalize entry numbering."""
+    """Remove markdown wrappers, normalize timestamps and entry numbering."""
     if not text or "NO_SUBTITLES_FOUND" in text:
         return ""
     text = re.sub(r"^\s*```(?:srt)?\s*", "", text, flags=re.IGNORECASE)
@@ -50,6 +72,12 @@ def parse_srt_from_text(text: str) -> str:
     index = 0
     while index < len(lines):
         line = lines[index].strip()
+        if "-->" in line:
+            parts = line.split("-->")
+            if len(parts) == 2:
+                s_ts = _normalize_timestamp(parts[0])
+                e_ts = _normalize_timestamp(parts[1].split()[0])
+                line = f"{s_ts} --> {e_ts}"
         if line.isdigit() and index + 1 < len(lines) and "-->" in lines[index + 1]:
             result.append(str(counter))
             counter += 1
@@ -120,52 +148,9 @@ def create_gemini_proxy_video(video_path: str, job_id: str, force: bool = False)
 
 
 def extract_hardsub_via_local_gateway(video_path: str, job_id: str, model_name: str = "gemini-3.8-flash-high") -> str:
-    """Trích xuất hardsub OCR sử dụng Local Gateway 8317 qua base64 visual proxy video."""
-    import base64
-    import requests as _requests
-    from config import AI_TRANSLATE_CONFIG
+    from services.ocr_windows import extract_windows
+    return extract_windows(video_path, job_id, model_name)
 
-    # Luôn tạo proxy 720p nhẹ không âm thanh để tối ưu dung lượng base64 payload
-    upload_video_path, is_proxy = create_gemini_proxy_video(video_path, job_id, force=True)
-
-    try:
-        with open(upload_video_path, "rb") as vf:
-            vid_b64 = base64.b64encode(vf.read()).decode("utf-8")
-
-        base_url = AI_TRANSLATE_CONFIG.get("base_url", "http://127.0.0.1:8317/v1").rstrip("/")
-        api_key = AI_TRANSLATE_CONFIG.get("api_key", "").strip()
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": model_name,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": HARDSUB_PROMPT},
-                        {"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{vid_b64}"}}
-                    ]
-                }
-            ],
-            "max_tokens": 4096,
-        }
-
-        print(f"⚡ [HardsubGateway] Đang gửi visual proxy ({Path(upload_video_path).stat().st_size / 1024:.0f}KB) tới Local Gateway {base_url} (model: {model_name})...")
-        resp = _requests.post(f"{base_url}/chat/completions", headers=headers, json=payload, timeout=300)
-        if resp.status_code != 200:
-            raise RuntimeError(f"Local Gateway trả về lỗi HTTP {resp.status_code}: {resp.text[:250]}")
-
-        data = resp.json()
-        raw_text = data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
-        return raw_text
-    finally:
-        if is_proxy and upload_video_path and os.path.exists(upload_video_path):
-            try:
-                os.unlink(upload_video_path)
-            except OSError:
-                pass
 
 
 def _friendly_gemini_error(error: Exception) -> str:
@@ -187,6 +172,7 @@ def _friendly_gemini_error(error: Exception) -> str:
     return f"Lỗi Gemini: {error}"
 
 
+@serial_task
 def hardsub_worker(job: dict) -> None:
     """Upload, extract, validate, translate and publish Hardsub artifacts."""
     started = time.time()
@@ -297,6 +283,8 @@ def hardsub_worker(job: dict) -> None:
 
             job.update({"status": "extracting_hardsub", "progress": 45, "message": f"Đang trích xuất hardsub bằng {model_name}..."})
             response = client.models.generate_content(model=model_name, contents=[video_file, HARDSUB_PROMPT])
+            if any(str(getattr(c, 'finish_reason', '')).split('.')[-1] in {'MAX_TOKENS', 'SAFETY', 'RECITATION'} for c in (response.candidates or [])):
+                raise RuntimeError('Gemini OCR bị cắt hoặc chặn; chưa thể coi là hoàn tất')
             raw_text = response.text or ""
         srt_content = parse_srt_from_text(raw_text)
         valid, errors = validate_srt(srt_content) if srt_content else (False, ["Không có SRT"])
@@ -313,7 +301,7 @@ def hardsub_worker(job: dict) -> None:
                 "lang_name": "中文 (原文)", "flag": "🇨🇳",
             }
         }
-        job.update({"progress": 75, "status": "translating" if translate_langs else "done", "segment_count": count_srt_segments(srt_content), "srt_files": srt_files})
+        job.update({"progress": 75, "status": "translating" if translate_langs else "processing", "segment_count": count_srt_segments(srt_content), "srt_files": srt_files})
 
         if translate_langs:
             from services.translation import translate_srt, translate_srt_ai
@@ -340,6 +328,10 @@ def hardsub_worker(job: dict) -> None:
                     srt_files[lang] = {"error": str(exc), "lang_name": LANGUAGES[lang]["name"], "flag": LANGUAGES[lang]["flag"]}
 
         job["srt_files"] = srt_files
+        if any('error' in value for value in srt_files.values()) or any(
+                q.get('unchanged_segments') for q in job.get('translation_quality', {}).values()):
+            job.update(status='partial', message='Bản dịch còn lỗi hoặc câu chưa dịch; cần kiểm tra SRT')
+            return
 
         # Tự động in đè phụ đề dịch lên vị trí hardsub cũ (giữ nguyên âm thanh gốc) nếu được chọn
         if job.get("auto_burn"):
@@ -376,18 +368,25 @@ def hardsub_worker(job: dict) -> None:
                         bgm_mode="orig_only",
                     )
                     if isinstance(burn_res, dict):
+                        if not burn_res.get('path') or not Path(burn_res['path']).is_file():
+                            raise RuntimeError('Chưa có video render hợp lệ')
                         job[f"burn_{burn_lang}"] = burn_res
                         job["burned_video"] = burn_res
+                    else:
+                        raise RuntimeError('Không nhận được kết quả render')
                 except Exception as b_err:
-                    print(f"[HARDSUB AUTO-BURN] Lỗi in đè sub: {b_err}")
+                    raise RuntimeError(f'Lỗi in đè phụ đề: {b_err}') from b_err
 
+        if job.get('cancel'):
+            job.update(status='cancelled', message='Đã hủy xử lý')
+            return
         job["status"] = "done"
         job["progress"] = 100
         job["total_time"] = round(time.time() - started, 1)
         job["message"] = "Hoàn tất!" if not job.get("auto_burn") else "Hoàn tất trích xuất và in đè phụ đề!"
     except Exception as exc:
         traceback.print_exc()
-        job["status"] = "error"
+        job["status"] = "cancelled" if job.get('cancel') else "error"
         job["message"] = _friendly_gemini_error(exc)
     finally:
         if 'is_proxy' in locals() and is_proxy and 'upload_video_path' in locals() and upload_video_path:

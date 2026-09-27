@@ -129,7 +129,9 @@ def execute_auto_pipeline(work: dict, channel_cfg: dict, video_path: str) -> dic
     nickname = channel_cfg.get("nickname", "Kênh Douyin")
     target_lang = channel_cfg.get("target_lang", "vi")
     style = channel_cfg.get("style", "driving")
-    bgm_mode = channel_cfg.get("bgm_mode", "ai")
+    bgm_mode = channel_cfg.get("bgm_mode", "keep_original")
+    audio_policy = channel_cfg.get("audio_policy", "keep_original")
+    tts_enabled = bool(channel_cfg.get("tts_enabled", False))
     clean_hardsub = channel_cfg.get("clean_hardsub", True)
     clean_logo = channel_cfg.get("clean_logo", True)
     translate_title = channel_cfg.get("translate_title", True)
@@ -243,9 +245,9 @@ def execute_auto_pipeline(work: dict, channel_cfg: dict, video_path: str) -> dic
         if job_state.get('translation_quality', {}).get(target_lang, {}).get('unchanged_segments'):
             raise RuntimeError('Bản dịch còn câu chưa dịch; cần kiểm tra')
 
-        # Step 3: Generate TTS Voiceover
+        # Step 3: Optional TTS voiceover. Subtitle-only channels keep original audio.
         tts_audio_path = None
-        if srt_content:
+        if srt_content and tts_enabled and audio_policy != "keep_original":
             try:
                 tts_res = generate_tts_audio(
                     job_id=job_id,
@@ -271,7 +273,7 @@ def execute_auto_pipeline(work: dict, channel_cfg: dict, video_path: str) -> dic
                 srt_content=srt_content,
                 sub_region=None,
                 extra_regions=None,
-                render_mode="inpaint_burn",
+                render_mode=channel_cfg.get("subtitle_cleanup_mode", "inpaint_burn"),
                 inpaint_engine="opencv",
                 trim_intro="off",  # already trimmed at step 1
                 translate_title=translate_title,
@@ -283,6 +285,8 @@ def execute_auto_pipeline(work: dict, channel_cfg: dict, video_path: str) -> dic
                 clean_logo=clean_logo,
                 clean_title=translate_title,
                 burn_new_sub=True,
+                keep_original_audio=(audio_policy == "keep_original"),
+                video_path=target_video,
             )
 
             final_video_path = burn_info.get("path") if isinstance(burn_info, dict) else None
@@ -291,6 +295,39 @@ def execute_auto_pipeline(work: dict, channel_cfg: dict, video_path: str) -> dic
             if final_video_path and os.path.exists(final_video_path):
                 size_mb = os.path.getsize(final_video_path) / (1024 * 1024)
                 print(f"✅ [AUTO STUDIO] Video completed: {final_video_path} ({size_mb:.1f}MB)")
+
+                publish_package_path = None
+                outbox_dir = channel_cfg.get("publish_outbox_dir") or os.getenv("DOUYIN_TIKTOK_OUTBOX_DIR")
+                if outbox_dir:
+                    from services.publish_outbox import emit_publish_package
+                    package_options = {
+                        "target_lang": target_lang,
+                        "strict_translation": True,
+                        "publish_rights_status": channel_cfg.get("rights_status") or os.getenv("DOUYIN_TIKTOK_RIGHTS_STATUS", "review_required"),
+                        "audio_policy": audio_policy,
+                        "caption": title,
+                    }
+                    publish_package_path = emit_publish_package(
+                        batch_id=job_id,
+                        item={
+                            "item_id": aweme_id,
+                            "source_path": video_path,
+                            "source_sha256": "",
+                            "relative_path": Path(video_path).name,
+                        },
+                        result={
+                            "video_path": final_video_path,
+                            "translation_method": "ai",
+                            "translation_fallbacks": (job_state.get("translation_fallbacks") or {}).get(target_lang, []),
+                            "translation_provider_warning": (job_state.get("translation_provider_warnings") or {}).get(target_lang),
+                            "translation_quality": (job_state.get("translation_quality") or {}).get(target_lang, {}),
+                        },
+                        options=package_options,
+                        outbox_dir=outbox_dir,
+                        work=work,
+                        channel_config=channel_cfg,
+                    )
+                    print(f"📦 [AUTO STUDIO] Publish package ready: {publish_package_path}")
 
                 # Deliver video to Telegram
                 caption = (
@@ -318,9 +355,9 @@ def execute_auto_pipeline(work: dict, channel_cfg: dict, video_path: str) -> dic
         mark_as_downloaded(aweme_id)
         print(f"🎉 [AUTO STUDIO] Pipeline finished and delivered for {aweme_id}!")
         jobs[job_id].update(status='done', delivery_status='delivered' if sent else 'pending',
-                           delivery_path=final_video_path, delivery_caption=caption,
+                           delivery_path=final_video_path, publish_package_path=str(locals().get('publish_package_path') or ''), delivery_caption=caption,
                            delivery_attempts=1, delivery_next_attempt=time.time()+3600)
-        return {'status': 'done', 'path': final_video_path, 'delivery_status': 'delivered' if sent else 'pending'}
+        return {'status': 'done', 'path': final_video_path, 'publish_package_path': str(locals().get('publish_package_path') or ''), 'delivery_status': 'delivered' if sent else 'pending'}
 
     except Exception as exc:
         import traceback

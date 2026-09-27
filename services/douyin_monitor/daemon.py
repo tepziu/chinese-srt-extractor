@@ -30,6 +30,7 @@ from services.douyin_monitor.pipeline_bridge import (
     execute_auto_pipeline,
     send_telegram_message,
 )
+from services.douyin_monitor.ledger import SourceLedger
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DOWNLOADS_TMP = BASE_DIR / "uploads" / "douyin_monitor_temp"
@@ -171,6 +172,7 @@ def _perform_scan() -> dict:
         _status["current_task"] = "Đang nạp danh sách kênh..."
 
     history = get_downloaded_history()
+    ledger = SourceLedger()
     channels = get_channels()
     enabled_channels = [ch for ch in channels if ch.get("enabled", True)]
     found_videos = 0
@@ -237,6 +239,8 @@ def _perform_scan() -> dict:
                         break
 
                     wid = str(w.get("aweme_id", ""))
+                    if not ledger.claim(channel_id=cid, work=w):
+                        continue
                     wtitle = w.get("desc", "No title")
                     found_videos += 1
 
@@ -259,16 +263,21 @@ def _perform_scan() -> dict:
 
                     if downloaded_file and os.path.exists(downloaded_file):
                         print(f"[DouyinDaemon] ✅ Đã tải video master: {downloaded_file}")
+                        ledger.mark(channel_id=cid, work_id=wid, status="DOWNLOADED", artifact_path=downloaded_file)
                         try:
+                            ledger.mark(channel_id=cid, work_id=wid, status="PROCESSING")
                             result = execute_auto_pipeline(w, ch, downloaded_file)
                             if not result or result.get('status') not in {'done', 'downloaded'}:
                                 raise RuntimeError('Pipeline chưa hoàn tất; giữ lại để thử lại')
+                            ledger.mark(channel_id=cid, work_id=wid, status="PACKAGE_READY", artifact_path=result.get("path"), package_path=result.get("publish_package_path"))
                             history.add(wid)
                             mark_as_downloaded(wid)
                         except Exception as proc_err:
+                            ledger.mark(channel_id=cid, work_id=wid, status="FAILED", error=str(proc_err))
                             print(f"[DouyinDaemon] ❌ Lỗi xử lý pipeline cho {wid}: {proc_err}")
                             errors.append(f"{wid}: {proc_err}")
                     else:
+                        ledger.mark(channel_id=cid, work_id=wid, status="FAILED", error="download failed")
                         print(f"[DouyinDaemon] ⚠️ Không thể tải video master cho {wid}")
 
                     time.sleep(2)

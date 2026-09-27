@@ -1863,6 +1863,13 @@ def add_douyin_channel():
     clean_hardsub = parse_bool(data.get("clean_hardsub"), default=True)
     clean_logo = parse_bool(data.get("clean_logo"), default=True)
     translate_title = parse_bool(data.get("translate_title"), default=True)
+    audio_policy = str(data.get("audio_policy", "keep_original")).strip()
+    tts_enabled = parse_bool(data.get("tts_enabled"), default=False)
+    subtitle_cleanup_mode = str(data.get("subtitle_cleanup_mode", "inpaint_burn")).strip()
+    target_profile_id = str(data.get("target_profile_id", "")).strip()
+    approval_policy = str(data.get("approval_policy", "manual")).strip()
+    rights_status = str(data.get("rights_status", "review_required")).strip()
+    publish_outbox_dir = str(data.get("publish_outbox_dir", "")).strip()
 
     if not sec_uid or sec_uid.startswith("MS4wLjABAAAA_rP") or len(sec_uid) < 30:
         try:
@@ -1887,6 +1894,13 @@ def add_douyin_channel():
         clean_hardsub=clean_hardsub,
         clean_logo=clean_logo,
         translate_title=translate_title,
+        audio_policy=audio_policy,
+        tts_enabled=tts_enabled,
+        subtitle_cleanup_mode=subtitle_cleanup_mode,
+        target_profile_id=target_profile_id,
+        approval_policy=approval_policy,
+        rights_status=rights_status,
+        publish_outbox_dir=publish_outbox_dir,
     )
     return jsonify({"status": "success", "channel": ch})
 

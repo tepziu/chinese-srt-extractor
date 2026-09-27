@@ -72,11 +72,24 @@ def add_channel(
     clean_hardsub: bool = True,
     clean_logo: bool = True,
     translate_title: bool = True,
+    audio_policy: str = "keep_original",
+    tts_enabled: bool = False,
+    subtitle_cleanup_mode: str = "inpaint_burn",
+    target_profile_id: str = "",
+    approval_policy: str = "manual",
+    rights_status: str = "review_required",
+    publish_outbox_dir: str = "",
 ) -> dict:
     """Add or update a monitored channel."""
     clean_id = channel_id.strip()
     if not clean_id:
         raise ValueError("Channel ID không được để trống")
+    if audio_policy not in {"keep_original", "replace_with_tts"}:
+        raise ValueError("audio_policy không hợp lệ")
+    if subtitle_cleanup_mode not in {"blur", "opaque_band", "inpaint_burn"}:
+        raise ValueError("subtitle_cleanup_mode không hợp lệ")
+    if approval_policy not in {"manual", "policy_auto", "disabled"}:
+        raise ValueError("approval_policy không hợp lệ")
 
     with _lock, host_lock('douyin-config', timeout=15):
         channels = load_channels()
@@ -91,6 +104,13 @@ def add_channel(
                 ch["clean_hardsub"] = clean_hardsub
                 ch["clean_logo"] = clean_logo
                 ch["translate_title"] = translate_title
+                ch["audio_policy"] = audio_policy
+                ch["tts_enabled"] = tts_enabled
+                ch["subtitle_cleanup_mode"] = subtitle_cleanup_mode
+                ch["target_profile_id"] = target_profile_id
+                ch["approval_policy"] = approval_policy
+                ch["rights_status"] = rights_status
+                ch["publish_outbox_dir"] = publish_outbox_dir
                 ch["enabled"] = True
                 save_channels(channels)
                 return ch

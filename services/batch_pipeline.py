@@ -98,6 +98,13 @@ def validate_batch_options(data: dict[str, Any] | None) -> dict[str, Any]:
     result["use_sidecar_srt"] = _as_bool(result.get("use_sidecar_srt"), True)
     result["keep_original_audio"] = _as_bool(result.get("keep_original_audio"), True)
     result["extensions"] = _normalise_extensions(result.get("extensions"))
+    result["publish_outbox_dir"] = str(
+        result.get("publish_outbox_dir") or os.getenv("DOUYIN_TIKTOK_OUTBOX_DIR") or ""
+    ).strip() or None
+    result["publish_rights_status"] = str(
+        result.get("publish_rights_status") or os.getenv("DOUYIN_TIKTOK_RIGHTS_STATUS") or "review_required"
+    ).strip().lower()
+    result["publish_niche"] = str(result.get("publish_niche") or "general").strip().lower()
 
     result["target_lang"] = str(result.get("target_lang") or "en").strip().lower()
     if result["target_lang"] != "en":
@@ -405,6 +412,16 @@ class BatchRunner:
                 try:
                     result = processor(item, self.options, self)
                     item["artifacts"] = dict(result or {})
+                    if self.options.get("publish_outbox_dir") and (result or {}).get("video_path"):
+                        from services.publish_outbox import emit_publish_package
+                        package_path = emit_publish_package(
+                            batch_id=self.batch_id,
+                            item=item,
+                            result=result or {},
+                            options=self.options,
+                            outbox_dir=self.options["publish_outbox_dir"],
+                        )
+                        item["artifacts"]["publish_package_path"] = str(package_path)
                     item["status"] = "done"
                     item["stage"] = "completed"
                     item["progress"] = 100

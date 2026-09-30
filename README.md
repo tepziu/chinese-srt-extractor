@@ -1,4 +1,4 @@
-﻿# Chinese SRT Extractor & Translator — All-in-One Studio
+# Chinese SRT Extractor & Translator — All-in-One Studio
 
 Studio all-in-one local trên Windows/Linux tích hợp trọn gói:
 
@@ -6,7 +6,7 @@ Studio all-in-one local trên Windows/Linux tích hợp trọn gói:
 - **Dịch thuật AI chuẩn phong cách**: Tiếng Việt, English, Bahasa Indonesia với các chế độ chuyên biệt: Lái xe & Mẹo xe (`driving`), Điện ảnh & Kịch bản (`movie`), Dịch sát nghĩa (`literal`), Hài hước Douyin (`fun`).
 - **Lồng tiếng TTS đa dạng**: Edge-TTS (nhẹ, nhanh), Gemini TTS (biểu cảm), OmniVoice (voice clone).
 - **Tách nhạc nền AI & Ducking**: Giữ nguyên âm thanh động cơ/SFX và nhạc nền gốc bằng Demucs v4 hoặc Sidechain Ducking tự động.
-- **Tẩy xóa chữ & In phụ đề**: Dynamic Blur, Inpaint xóa sạch 100% hardsub cũ, xóa logo watermark, dịch & thay banner tiêu đề, tự động cắt ảnh bìa chữ Hán đầu video.
+- **Tẩy xóa chữ & In phụ đề**: Dynamic Blur, Inpaint xử lý hardsub cũ, xóa logo watermark, dịch & thay banner tiêu đề, tự động cắt ảnh bìa chữ Hán đầu video.
 - **Giám sát kênh Douyin tự động (Auto Monitor Daemon)**: Tự động theo dõi các kênh chỉ định, tải bản gốc Master, tự động chạy toàn bộ dây chuyền xử lý và gửi video hoàn chỉnh về Telegram.
 - **Điều khiển 2 trong 1**: Giao diện Web UI hiện đại & Telegram Bot tiện lợi.
 
@@ -36,6 +36,15 @@ OCR qua gateway được chia thành các cửa sổ 60 giây với 1 giây ch�
 
 Clean Plate đưa frame trực tiếp vào FFmpeg để mã hóa một lần trong bước làm sạch, giữ đầy đủ ROI ngang/dọc. Nếu xuất riêng video sạch rồi in thêm phụ đề, bước in vẫn cần mã hóa riêng. Luồng này xuất H.264/CFR; chưa đảm bảo giữ nguyên VFR/HDR của nguồn.
 
+### Căn mốc và chống sót hardsub cho các video mới
+
+- Luồng Studio, trích hardsub độc lập và batch luôn giữ timeline tiếng Trung gốc riêng khỏi phụ đề dịch/TTS. Không cần bật tinh chỉnh mới được dùng thời gian gốc; mốc từ ASR/Gemini vẫn được ghi rõ là ước lượng.
+- Clean Plate/Inpaint và che mờ có kiểm tra hình ảnh mặc định: tạo mẫu nét chữ từ chính video/ROI đang xử lý. Ngoài đối chiếu gần ranh giới cue, hệ thống tìm dòng chữ cùng hình thái/vị trí xuất hiện ngoài SRT, chỉ bổ sung khoảng mới sau ít nhất ba frame liên tiếp có mẫu nét ổn định. Các frame đầu của khoảng được bổ sung lại; nền sáng đơn thuần không đủ để xóa. Không OCR nặng trên mọi frame. Có thể tắt bằng `clean_options.visual_guard=false` để đối chiếu/rollback.
+- Vùng hardsub gốc được lưu trước khi xóa và truyền sang bước in mới; không dò lại tọa độ trên video sạch chữ. ASS căn giữa khối chữ tại tâm vùng gốc, tự xuống dòng/giảm cỡ chữ theo chiều rộng và cao của vùng. Không cắt bỏ nội dung để ép vừa; câu không thể vừa sẽ có `subtitle_layout.overflow_cues` để kiểm tra.
+- Tùy chọn **Thử căn mốc hardsub Trung theo frame gốc** ở Bước 2 vẫn tắt mặc định. Khi bật, OCR xác nhận nội dung ở một vài frame đại diện; xử lý ảnh theo dõi mẫu chữ để đo ranh giới trong cửa sổ tối đa 2 giây. Mốc đầu/cuối được xác nhận riêng; mốc chưa đủ bằng chứng giữ nguyên. Kết quả có tiến độ số câu và số lần OCR; `hardsub_visual_timing.json` ghi bằng chứng từng cue. Bản trước khi chỉnh nằm ở `hardsub_zh_original_timing.srt`.
+- Thông tin render `timing_guard` ghi số mẫu, cue thiếu mẫu và frame bổ sung. `qc_status=not_checked` nghĩa là chưa có kiểm tra sạch chữ toàn video; hoàn tất xuất file không phải chứng nhận sạch 100%.
+- Bản này ưu tiên chữ sáng/vàng có tương phản/viền tối trong vùng phụ đề đã xác định. Chữ chuyển động/karaoke, font/màu/hình thái khác các mẫu đã học, ROI sai hoặc VFR/HDR vẫn cần kiểm tra. Kiểm tra sự xuất hiện ngoài SRT phục vụ xóa chữ; không tự bổ sung nội dung dịch cho câu mà provider đã bỏ sót. Các trường hợp đó cần xem trước/chỉnh vùng hoặc kiểm tra thủ công; không tự coi là chính xác tuyệt đối.
+
 TTS giữ đủ lời đọc, tạo SRT căn chỉnh và đánh dấu `partial` nếu thiếu câu hoặc lời đọc vượt khoảng thời gian. Trường hợp này cần kiểm tra trước khi render tiếp. Không có cam kết khớp tuyệt đối mọi câu với thời lượng gốc.
 
 ---
@@ -59,6 +68,7 @@ Chỉ cần chạy file `start_all.bat`:
 
 ### 3. Quản lý trên Web UI
 - Mở `http://127.0.0.1:5000`
+- Nút **Dừng** trong Studio/TTS/batch mở hộp xác nhận. Chọn **Tiếp tục xử lý** để giữ job; **Xác nhận dừng** mới gửi yêu cầu lên server. UI sẽ báo đã nhận yêu cầu, không khẳng định AI/render đã dừng tức thì. Các tệp đã hoàn tất vẫn được giữ lại. Nếu kết nối lỗi, nút Dừng được bật lại và job vẫn có thể tiếp tục chạy.
 - Chuyển sang tab **"🛰️ Giám sát Douyin"**:
   - Xem trạng thái tiến trình giám sát và các nút điều khiển nhanh (**Tạm dừng**, **Quét ngay**).
   - Nhập ID hoặc dán link chia sẻ Douyin, bấm **Kiểm tra kênh** để xem trước Tên & Avatar.

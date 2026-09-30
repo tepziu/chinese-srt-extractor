@@ -671,6 +671,7 @@ def process_video_item(item: dict[str, Any], options: dict[str, Any], runner: Ba
         job_id=child_id,
         lang="en",
         srt_content=en_content,
+        clean_timing_srt=zh_content,
         sub_region=selected_region,
         extra_regions=None,
         render_mode=render_mode,

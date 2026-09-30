@@ -191,6 +191,16 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
     #progressSection, .progress-section, #resultSection, .result-section { display: none; }
 #progressSection.show, .progress-section.show,
 #resultSection.show, .result-section.show { display: block !important; }
+
+.stop-confirm-dialog { border:1px solid rgba(239,68,68,.35); border-radius:14px; background:var(--bg-card); color:var(--text-primary); width:min(440px,calc(100vw - 32px)); padding:20px; box-shadow:0 24px 70px rgba(0,0,0,.5); }
+.stop-confirm-dialog::backdrop { background:rgba(4,8,18,.75); }
+.stop-confirm-dialog h2 { font-size:17px; margin:0 0 10px; }
+.stop-confirm-dialog p { font-size:13px; line-height:1.55; color:var(--text-secondary); margin:0 0 16px; }
+.stop-confirm-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:10px; }
+.stop-confirm-actions button { border:1px solid var(--border); border-radius:8px; padding:9px 14px; cursor:pointer; font-weight:600; color:var(--text-primary); background:var(--bg-secondary); }
+.stop-confirm-actions button[value="stop"] { background:#b91c1c; border-color:#ef4444; color:#fff; }
+.stop-confirm-actions button:focus-visible { outline:2px solid #fbbf24; outline-offset:2px; }
+.stop-request-status { font-size:11px; color:var(--text-secondary); margin-top:7px; min-height:1em; }
 </style>
 
 <body>
@@ -300,10 +310,11 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
                 <button class="btn-primary-studio" style="margin:0; background:linear-gradient(135deg,#2563eb,#1d4ed8);" onclick="runBatchFolder()">🚀 BẮT ĐẦU DỊCH THƯ MỤC</button>
-                <button class="btn-secondary" type="button" onclick="stopBatchFolder()">Dừng batch</button>
+                <button class="btn-secondary" id="batchStopBtn" type="button" onclick="stopBatchFolder()">Dừng batch</button>
             </div>
             <div id="batchStatusCard" style="display:none; margin-top:16px; padding:12px; border:1px solid var(--border); border-radius:8px;">
                 <div id="batchStatusText" role="status" style="font-size:12px; margin-bottom:8px;"></div>
+                <div id="batchStopStatus" class="stop-request-status" role="status" aria-live="polite"></div>
                 <div style="height:8px; background:var(--bg-secondary); border-radius:4px; overflow:hidden;"><div id="batchProgressBar" style="height:100%; width:0%; background:#2563eb; transition:width .3s;"></div></div>
                 <div id="batchItems" style="margin-top:10px; max-height:260px; overflow:auto; font-size:11px;"></div>
             </div>
@@ -461,6 +472,10 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                                     <span style="font-size:10px; color:var(--text-muted); margin-top:4px;">(Khuyên dùng: Cho phép duyệt lại nội dung dịch, chống sai sót trước khi tốn thời gian render video)</span>
                                 </div>
                             </div>
+                            <label style="display:flex; align-items:center; gap:8px; font-size:11px; cursor:pointer; margin-top:4px;">
+                                <input type="checkbox" id="pipeVisualTimingChk" style="accent-color:#10b981;">
+                                <span>🧪 Thử căn mốc hardsub Trung theo frame gốc (chậm hơn; giữ mốc cũ nếu không chắc)</span>
+                            </label>
                         </div>
                     </div>
 
@@ -513,7 +528,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                                 <input type="checkbox" class="step-checkbox" id="chkStep4" checked onclick="event.stopPropagation()" onchange="updateStepState(4)">
                                 <div>
                                     <div class="step-title">Bước 4: Tạo thuyết minh giọng đọc (SRT to TTS)</div>
-                                    <div class="step-desc">Tạo file âm thanh MP3 khớp 100% thời lượng phụ đề, 0% chồng chéo (Smart Sync)</div>
+                                    <div class="step-desc">Tạo file MP3 căn theo timeline phụ đề (Smart Sync); kiểm tra các đoạn cần chỉnh thời gian</div>
                                 </div>
                             </div>
                             <span class="accordion-icon" id="stepIcon4">▼</span>
@@ -553,7 +568,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                         <div class="step-body" id="stepBody5">
                             <!-- THANH THÔNG BÁO LIÊN KẾT BƯỚC 3 -->
                             <div id="step5SourceNotice" style="margin-bottom:12px; padding:8px 12px; border-radius:8px; font-size:11px; border:1px solid rgba(16,185,129,0.35); background:rgba(16,185,129,0.12); color:#34d399; line-height:1.4;">
-                                🟢 <b>Đã liên kết Bước 3:</b> Sẽ in phụ đề mới thẳng lên <b>Video đã xóa sạch chữ</b> (Chất lượng hoàn hảo, 100% không bị đè chữ cũ).
+                                🟢 <b>Đã liên kết Bước 3:</b> Sẽ in phụ đề mới thẳng lên <b>Video đã xóa sạch chữ</b> (Không xóa lại lần hai; cần xem trước chất lượng xử lý chữ cũ).
                             </div>
 
                             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
@@ -620,8 +635,11 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
                 <span style="font-size:11px; color:var(--text-muted);" id="progressDetail">Vui lòng đợi trong giây lát...</span>
-                <button type="button" class="btn-exit" style="position:static; padding:3px 10px; font-size:11px;" onclick="cancelCurrentJob()">🛑 Dừng xử lý</button>
+                <button type="button" id="pipelineStopBtn" class="btn-exit" style="position:static; padding:3px 10px; font-size:11px;" onclick="cancelCurrentJob()">🛑 Dừng xử lý</button>
             </div>
+
+            <div id="pipelineStopStatus" class="stop-request-status" role="status" aria-live="polite"></div>
+            <div class="stop-request-status">Dừng chỉ ảnh hưởng job hiện tại; tệp đã hoàn tất không bị xóa. Bước AI/render có thể cần thời gian để phản hồi.</div>
 
             <!-- KHUNG TẠM DỪNG ĐỂ DUYỆT / SỬA PHỤ ĐỀ (HUMAN-IN-THE-LOOP) -->
             <div id="reviewBox" style="display:none; background:rgba(245,158,11,0.08); border:1.5px solid #f59e0b; border-radius:12px; padding:16px; margin-top:16px;">
@@ -868,8 +886,9 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                     </div>
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
                         <span style="font-size:11px; color:var(--text-muted);" id="srtTtsProgressMsg">Đang chuẩn bị...</span>
-                        <button class="btn-exit" style="position:static; padding:2px 8px; font-size:11px;" onclick="cancelSrtTts()">🛑 Hủy</button>
+                        <button class="btn-exit" id="srtTtsStopBtn" style="position:static; padding:2px 8px; font-size:11px;" onclick="cancelSrtTts()">🛑 Hủy</button>
                     </div>
+                    <div id="srtTtsStopStatus" class="stop-request-status" role="status" aria-live="polite"></div>
                 </div>
 
                 <div id="srtTtsResultCard" style="display:none; background:var(--bg-secondary); border:1px solid rgba(16,185,129,0.4); border-radius:12px; padding:18px; margin-top:16px;">
@@ -1113,6 +1132,15 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
             <div class="error-msg" id="errorMsg"></div>
         </div>
 
+        <dialog id="stopConfirmDialog" class="stop-confirm-dialog" aria-labelledby="stopConfirmTitle" aria-describedby="stopConfirmDescription">
+            <h2 id="stopConfirmTitle">Dừng công việc này?</h2>
+            <p id="stopConfirmDescription">Bạn có chắc muốn dừng? Các tệp đã hoàn tất vẫn được giữ lại.</p>
+            <form method="dialog" class="stop-confirm-actions">
+                <button type="submit" id="stopKeepRunningBtn" value="keep">Tiếp tục xử lý</button>
+                <button type="submit" value="stop">Xác nhận dừng</button>
+            </form>
+        </dialog>
+        <script src="/static/js/stop-confirm.js"></script>
         <script src="/static/js/studio-review.js"></script>
         <script>
     // --- LOAD DEVICE INFO IMMEDIATELY ---
@@ -1298,7 +1326,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
             notice.style.background = 'rgba(16,185,129,0.12)';
             notice.style.borderColor = 'rgba(16,185,129,0.35)';
             notice.style.color = '#34d399';
-            notice.innerHTML = '🟢 <b>Đã liên kết Bước 3:</b> Sẽ in phụ đề mới thẳng lên <b>Video đã xóa sạch chữ</b> (Chất lượng hoàn hảo, 100% không bị đè chữ cũ).';
+            notice.innerHTML = '🟢 <b>Đã liên kết Bước 3:</b> Sẽ in phụ đề mới thẳng lên <b>Video đã xóa sạch chữ</b> (Không xóa lại lần hai; cần xem trước chất lượng xử lý chữ cũ).';
         } else {
             notice.style.background = 'rgba(245,158,11,0.1)';
             notice.style.borderColor = 'rgba(245,158,11,0.3)';
@@ -1344,7 +1372,8 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                     target_lang: document.getElementById('pipeTargetLang') ? document.getElementById('pipeTargetLang').value : 'vi',
                     style: document.getElementById('pipeStyleSelect') ? document.getElementById('pipeStyleSelect').value : 'movie',
                     translate_method: 'ai',
-                    pause_for_review: document.getElementById('pipePauseReviewChk') ? document.getElementById('pipePauseReviewChk').checked : false
+                    pause_for_review: document.getElementById('pipePauseReviewChk') ? document.getElementById('pipePauseReviewChk').checked : false,
+                    visual_timing: document.getElementById('pipeVisualTimingChk') ? document.getElementById('pipeVisualTimingChk').checked : false
                 },
                 clean_options: {
                     region_mode: document.getElementById('pipeCleanRegionMode') ? document.getElementById('pipeCleanRegionMode').value : 'auto',
@@ -1470,6 +1499,8 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
     });
 
     function startPollingPipeline(jobId) {
+        document.getElementById('pipelineStopBtn').disabled = false;
+        document.getElementById('pipelineStopStatus').textContent = '';
         try { localStorage.setItem('studio-current-job', jobId); } catch (_) {}
         if (pipelinePollInterval) clearInterval(pipelinePollInterval);
         let busy = false;
@@ -1495,8 +1526,8 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                     onPipelineFinished(job);
                 } else if (['error', 'cancelled', 'interrupted'].includes(job.status)) {
                     clearInterval(pipelinePollInterval);
-                    document.getElementById('progressText').textContent = '❌ ' + (job.message || 'Lỗi xử lý');
-                    document.getElementById('progressPercent').textContent = '!';
+                    document.getElementById('progressText').textContent = (job.status === 'cancelled' ? '🛑 ' : '❌ ') + (job.message || 'Công việc đã kết thúc');
+                    document.getElementById('progressPercent').textContent = job.status === 'cancelled' ? (job.progress || 0) + '%' : '!';
                     onPipelineFinished(job);
                     document.getElementById('btnRunPipeline').disabled = false;
                     document.getElementById('btnRunPipeline').innerHTML = '<span>🚀 BẮT ĐẦU CHẠY QUY TRÌNH STUDIO (START PIPELINE)</span>';
@@ -1608,7 +1639,27 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
         document.getElementById('btnRunPipeline').disabled = false;
         document.getElementById('btnRunPipeline').innerHTML = '<span>🚀 BẮT ĐẦU CHẠY QUY TRÌNH STUDIO (START PIPELINE)</span>';
 
-        document.getElementById('pipelineResultNotice').textContent = (job.status === 'done' ? '✅ ' : '⚠️ ') + (job.message || job.status);
+        document.getElementById('pipelineResultNotice').textContent = (job.status === 'done' ? '✅ ' : job.status === 'cancelled' ? '🛑 ' : '⚠️ ') + (job.message || job.status);
+        const cleanup = job.step_results?.burn?.timing_guard ? job.step_results.burn : (job.step_results?.clean || {});
+        const timingGuard = cleanup.timing_guard;
+        const subtitleLayout = job.step_results?.burn?.subtitle_layout;
+        if (subtitleLayout?.region?.method === 'fixed_fallback') {
+            document.getElementById('pipelineResultNotice').textContent += ' • Chưa xác định chắc vùng chữ gốc; nên chọn vùng thủ công để in đúng vị trí.';
+        }
+        if (subtitleLayout?.overflow_cues?.length) {
+            document.getElementById('pipelineResultNotice').textContent += ` • ${subtitleLayout.overflow_cues.length} câu dịch quá dài cho vùng gốc; cần xem lại/chỉnh câu.`;
+        }
+        if (timingGuard?.enabled) {
+            document.getElementById('pipelineResultNotice').textContent += ` • Kiểm tra biên chữ: bổ sung ${timingGuard.recovered_frames || 0} frame.`;
+            if (timingGuard.presence_gap_intervals?.length) {
+                document.getElementById('pipelineResultNotice').textContent += ` Phát hiện ${timingGuard.presence_gap_intervals.length} khoảng chữ ngoài mốc SRT; nên đối chiếu nội dung nguồn.`;
+            }
+            if (timingGuard.missing_templates || timingGuard.error) {
+                document.getElementById('pipelineResultNotice').textContent += ' Có đoạn chưa đủ mẫu chữ; cần xem lại video.';
+            } else {
+                document.getElementById('pipelineResultNotice').textContent += ' Hãy xem trước video; đây chưa phải xác nhận sạch chữ trên toàn bộ video.';
+            }
+        }
         document.getElementById('retryPipelineBtn').style.display = ['partial', 'error', 'interrupted', 'cancelled'].includes(job.status) ? 'inline-block' : 'none';
         ['dlSourceVideo','dlZhSrt','dlTargetSrt','dlCleanVideo','dlTtsAudio','dlFinalVideo'].forEach(id => {
             document.getElementById(id).style.display = 'none';
@@ -1809,12 +1860,16 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
         }
     }
 
-    function cancelCurrentJob() {
-        if (pipelineJobId) {
-            stopJob();
-            if (pipelinePollInterval) clearInterval(pipelinePollInterval);
-            document.getElementById('progressText').textContent = '🛑 Đã dừng xử lý.';
-        }
+    async function cancelCurrentJob() {
+        if (!pipelineJobId) return;
+        await StudioStop.request({
+            jobId: pipelineJobId,
+            url: '/api/stop/' + encodeURIComponent(pipelineJobId),
+            button: document.getElementById('pipelineStopBtn'),
+            statusElement: document.getElementById('pipelineStopStatus'),
+            description: 'Dừng job Studio hiện tại? Các tệp đã hoàn tất vẫn được giữ lại. Bước AI hoặc render có thể cần thời gian để kết thúc.'
+        });
+        // Keep polling. Only server state may finish the progress view.
     }
 
 
@@ -2075,12 +2130,15 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
         }
 
 
-        function stopJob() {
+        async function stopJob() {
             if (!currentJobId) return;
-if (!confirm("Bạn có chắc chắn muốn dừng quá trình này không?")) return;
-            fetch('/api/stop/' + currentJobId, { method: 'POST' });
-document.getElementById('statusMessage').textContent = '🛑 Đang dừng...';
-            document.querySelector('.btn-stop').disabled = true;
+            await StudioStop.request({
+                jobId: currentJobId,
+                url: '/api/stop/' + encodeURIComponent(currentJobId),
+                button: document.querySelector('.btn-stop'),
+                statusElement: document.getElementById('statusMessage'),
+                description: 'Dừng công việc hiện tại? Các tệp đã hoàn tất vẫn được giữ lại. Bước đang chạy có thể cần thời gian để kết thúc.'
+            });
         }
 
         function exitApp() {
@@ -4193,6 +4251,8 @@ function uploadWithProgress(url, formData, onProgress) {
             const resultCard = document.getElementById('srtTtsResultCard');
             progressCard.style.display = 'block';
             resultCard.style.display = 'none';
+            document.getElementById('srtTtsStopBtn').disabled = false;
+            document.getElementById('srtTtsStopStatus').textContent = '';
 
             document.getElementById('srtTtsProgressPercent').textContent = '5%';
             document.getElementById('srtTtsProgressFill').style.width = '5%';
@@ -4254,9 +4314,14 @@ function uploadWithProgress(url, formData, onProgress) {
                     } else if (['error', 'cancelled', 'interrupted'].includes(data.status)) {
                         clearInterval(srtToTtsPollInterval);
                         srtToTtsPollInterval = null;
-                        alert('Có lỗi xảy ra: ' + (data.message || 'Lỗi không xác định'));
                         document.getElementById('btnRunSrtTts').disabled = false;
-                        document.getElementById('srtTtsProgressCard').style.display = 'none';
+                        if (data.status === 'cancelled') {
+                            document.getElementById('srtTtsProgressText').textContent = data.message || 'Đã ghi nhận yêu cầu dừng.';
+                            document.getElementById('srtTtsStopBtn').disabled = true;
+                        } else {
+                            document.getElementById('srtTtsProgressText').textContent = data.message || 'Công việc bị gián đoạn.';
+                            document.getElementById('srtTtsStopBtn').disabled = true;
+                        }
                     }
                 } catch(e) {
                     console.warn('Lỗi polling status:', e);
@@ -4333,14 +4398,15 @@ function uploadWithProgress(url, formData, onProgress) {
         }
 
         async function cancelSrtTts() {
-            if (srtToTtsJobId) {
-                try {
-                    await fetch('/api/stop/' + srtToTtsJobId, { method: 'POST' });
-                } catch(e) {}
-            }
-            if (srtToTtsPollInterval) clearInterval(srtToTtsPollInterval);
-            document.getElementById('srtTtsProgressCard').style.display = 'none';
-            document.getElementById('btnRunSrtTts').disabled = false;
+            if (!srtToTtsJobId) return;
+            await StudioStop.request({
+                jobId: srtToTtsJobId,
+                url: '/api/stop/' + encodeURIComponent(srtToTtsJobId),
+                button: document.getElementById('srtTtsStopBtn'),
+                statusElement: document.getElementById('srtTtsStopStatus'),
+                description: 'Dừng tạo thuyết minh? Audio đã hoàn tất vẫn được giữ lại; yêu cầu đang xử lý có thể cần thời gian để kết thúc.'
+            });
+            // Poll until server reports terminal status; do not pretend an unconfirmed request succeeded.
         }
     
 
@@ -4481,6 +4547,8 @@ function uploadWithProgress(url, formData, onProgress) {
             const data = await response.json();
             if (!response.ok) { alert(data.error || 'Không thể tạo batch'); return; }
             batchFolderId = data.batch_id;
+            document.getElementById('batchStopBtn').disabled = false;
+            document.getElementById('batchStopStatus').textContent = '';
             document.getElementById('batchStatusCard').style.display = 'block';
             pollBatchFolder();
         }
@@ -4499,13 +4567,24 @@ function uploadWithProgress(url, formData, onProgress) {
                 return `<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:5px 0;"><span>${item.relative_path}${regionText}</span><span>${item.status} ${item.progress || 0}%</span></div>`;
             }).join('');
             document.getElementById('batchItems').innerHTML = rows;
-            if (!['done','partial','failed','cancelled','error','interrupted'].includes(data.status)) batchFolderPoll = setTimeout(pollBatchFolder, 1500);
+            if (!['done','partial','failed','cancelled','error','interrupted'].includes(data.status)) {
+                batchFolderPoll = setTimeout(pollBatchFolder, 1500);
+            } else {
+                document.getElementById('batchStopBtn').disabled = true;
+            }
         }
 
         async function stopBatchFolder() {
             if (!batchFolderId) return;
-            await fetch('/api/batch/' + encodeURIComponent(batchFolderId) + '/stop', {method:'POST'});
-            pollBatchFolder();
+            const result = await StudioStop.request({
+                jobId: batchFolderId,
+                url: '/api/batch/' + encodeURIComponent(batchFolderId) + '/stop',
+                button: document.getElementById('batchStopBtn'),
+                statusElement: document.getElementById('batchStopStatus'),
+                title: 'Dừng xử lý cả thư mục?',
+                description: 'Các video đã hoàn tất vẫn được giữ lại. Video đang xử lý có thể cần thời gian để kết thúc; các video còn lại sẽ không bắt đầu.'
+            });
+            if (result.ok) pollBatchFolder();
         }
 
         window.addEventListener('DOMContentLoaded', () => {

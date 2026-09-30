@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, request, jsonify, send_file as _send_file, make_response
-from services.runtime_state import valid_job_id, resolve_media_path, host_lock, public_data
+from services.runtime_state import valid_job_id, resolve_media_path, host_lock, public_data, TERMINAL
 from services.pipeline_options import validate_tts_options
 
 from config import (
@@ -619,6 +619,7 @@ def _finish_upload():
             video_file=_video_info(str(video_path)),
             gemini_api_key=gemini_api_key,
             gemini_model=gemini_model,
+            visual_timing_enabled=parse_bool(meta.get('visual_timing'), default=False),
             translate_langs=translate_langs,
             translate_method=translate_method,
             translation_mode=translation_mode,
@@ -935,6 +936,9 @@ def get_status(job_id):
     if job is None:
         return jsonify({"error": "Job không tồn tại"}), 404
 
+    from services.pipeline_completion import reconcile_final_render
+    reconcile_final_render(job, job_id, OUTPUT_FOLDER)
+
     missing_artifacts = [path for path in _declared_artifact_paths(job) if not path.is_file()]
     if missing_artifacts:
         job['artifact_warnings'] = [path.name for path in missing_artifacts]
@@ -963,11 +967,16 @@ def stop_job(job_id):
     job = get_job(job_id)
     if job is None:
         return jsonify({"error": "Job không tồn tại"}), 404
+    if job.get('status') == 'cancelled':
+        return jsonify({"status": "ok", "cancel_requested": True,
+                        "already_requested": True, "worker_stopped": False})
+    if job.get('status') in TERMINAL:
+        return jsonify({"error": "Công việc đã kết thúc; không thể dừng kết quả đã hoàn tất."}), 409
     # A remote cancel must not overwrite a newer worker snapshot.
     jobs.store.cancel(job_id)
     if job.get('_owner_pid') == os.getpid():
         job["cancel"] = True
-    job.update(status='cancelled', message='Đã hủy công việc')
+    job.update(status='cancelled', message='Đã ghi nhận yêu cầu dừng; công đoạn hiện tại có thể cần thời gian để kết thúc.')
 
     for process_key in ("_ffmpeg_process", "_download_process", "_tts_process"):
         process = job.get(process_key)
@@ -977,7 +986,7 @@ def stop_job(job_id):
             except Exception:
                 pass
 
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "cancel_requested": True, "worker_stopped": False})
 @api_bp.route("/api/shutdown", methods=["POST"])
 def shutdown():
     # Disabled by default: an unauthenticated shutdown endpoint is unsafe on LAN.
@@ -1728,6 +1737,7 @@ def start_hardsub():
         video_file=_video_info(str(video_path)),
         gemini_api_key=gemini_api_key,
         gemini_model=gemini_model,
+        visual_timing_enabled=parse_bool(request.form.get('visual_timing'), default=False),
         translate_langs=translate_langs,
         translate_method=translate_method,
         translation_mode=translation_mode,
@@ -1793,6 +1803,7 @@ def start_hardsub_url():
         message="Đang tải video từ URL...",
         gemini_api_key=gemini_api_key,
         gemini_model=gemini_model,
+        visual_timing_enabled=parse_bool(data.get('visual_timing'), default=False),
         translate_langs=_parse_languages(data.get("translate_langs", [])),
         translate_method=translate_method,
         translation_mode=translation_mode,
@@ -2413,12 +2424,21 @@ def retry_pipeline(job_id):
         options.pop('target_srt_path', None)
         options.pop('srt_path', None)
         options['steps']['extract_sub'] = False
+        original_timing = job.get('source_visual_srt')
+        if not original_timing:
+            original_info = job.get('srt_files', {}).get('zh', {})
+            if original_info.get('path') and Path(original_info['path']).is_file():
+                original_timing = Path(original_info['path']).read_text(encoding='utf-8-sig')
+        if original_timing:
+            options['zh_srt_content'] = original_timing
     if job.get('video_path') and Path(job['video_path']).is_file():
         options.update(video_path=job['video_path'], source_type='upload', trim_intro='off')
         options['steps']['download'] = False
         if job.get('clean_video', {}).get('path') == job['video_path']:
             options['steps']['clean_video'] = False
             options.setdefault('burn_options', {})['render_mode'] = 'pure_burn'
+            if job.get('source_sub_region'):
+                options['burn_options'].update(region_mode='manual', sub_region=job['source_sub_region'])
     if data.get('tts_options') is not None:
         if not isinstance(data['tts_options'], dict):
             raise ValueError('tts_options phải là object')

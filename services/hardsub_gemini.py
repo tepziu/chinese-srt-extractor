@@ -293,6 +293,12 @@ def hardsub_worker(job: dict) -> None:
 
         output_dir = OUTPUT_FOLDER / job_id
         output_dir.mkdir(parents=True, exist_ok=True)
+        if job.get('visual_timing_enabled'):
+            from services.visual_timing import refine_and_store
+            job['message'] = '🔎 Đang đối chiếu ranh giới phụ đề với frame gốc...'
+            srt_content = refine_and_store(job, video_path, srt_content, output_dir)
+        job['source_visual_srt'] = srt_content
+        job['source_timing_origin'] = 'vision_estimate'
         zh_path = output_dir / "hardsub_zh.srt"
         zh_path.write_text(srt_content, encoding="utf-8")
         srt_files = {
@@ -355,6 +361,7 @@ def hardsub_worker(job: dict) -> None:
                         job_id=job_id,
                         lang=burn_lang,
                         srt_content=burn_srt,
+                        clean_timing_srt=srt_content,
                         sub_region=sub_reg,
                         render_mode=r_mode,
                         inpaint_engine="opencv",

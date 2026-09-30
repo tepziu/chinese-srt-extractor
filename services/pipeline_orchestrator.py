@@ -341,6 +341,12 @@ def _pipeline_worker(job_id: str, config: Dict[str, Any]) -> None:
         zh_srt_content = config.get("zh_srt_content", "")
         target_srt_content = config.get("target_srt_content") or config.get("srt_content", "")
         target_srt_path = config.get("target_srt_path") or config.get("srt_path", "")
+        if zh_srt_content and not steps.get('extract_sub', True):
+            valid, errors = validate_srt(zh_srt_content)
+            if not valid:
+                raise ValueError('Nguồn phụ đề gốc không hợp lệ: ' + '; '.join(errors[:2]))
+            job['source_visual_srt'] = zh_srt_content
+            job['source_timing_origin'] = 'provided_estimate'
 
         if target_srt_content and not target_srt_path:
             target_srt_path = str(output_dir / f"hardsub_{target_lang}.srt")
@@ -399,6 +405,14 @@ def _pipeline_worker(job_id: str, config: Dict[str, Any]) -> None:
             valid, errors = validate_srt(zh_srt_content)
             if not valid:
                 raise RuntimeError("Nguồn phụ đề không hợp lệ: " + "; ".join(errors[:2]))
+            if sub_opts.get('visual_timing') and sub_engine in {'gemini', 'hybrid'} and not gemini_error:
+                from services.visual_timing import refine_and_store
+                job['message'] = '🔎 Đang đối chiếu ranh giới phụ đề với frame gốc...'
+                zh_srt_content = refine_and_store(job, video_path, zh_srt_content, output_dir)
+            # Keep original-language timing even when optional OCR refinement is
+            # disabled or fails. Translation/TTS timelines never replace it.
+            job['source_visual_srt'] = zh_srt_content
+            job['source_timing_origin'] = 'audio_estimate' if sub_engine == 'whisper' or gemini_error else 'vision_estimate'
             zh_path = output_dir / ("hybrid_zh.srt" if sub_engine == "hybrid" else f"{sub_engine}_zh.srt")
             zh_path.write_text(zh_srt_content, encoding="utf-8")
             job["srt_files"]["zh"] = {
@@ -581,14 +595,18 @@ def _execute_remaining_steps(
             sub_reg = clean_opts["sub_region"]
         else:
             job["message"] = "🔍 [Bước 3/5] Đang tự động quét tọa độ hardsub bằng AI OCR..."
-            sub_reg = detect_hardsub_region(video_path, job_id=job_id, srt_content=target_srt_content)
+            sub_reg = detect_hardsub_region(video_path, job_id=job_id, srt_content=job.get('source_visual_srt') or target_srt_content)
 
+        job['source_sub_region'] = dict(sub_reg)
+        job['source_geometry_video_path'] = video_path
+        job.setdefault('artifacts', {}).setdefault('source_video', video_path)
         clean_out = str(output_dir / "video_clean_plate.mp4")
         engine = clean_opts.get("engine", "opencv")
         clean_result = clean_video_pipeline(
             video_path=video_path,
             sub_region=sub_reg,
-            srt_content=target_srt_content or "",
+            # Do not gate original-text removal by a translated/display/TTS timeline.
+            srt_content=job.get('source_visual_srt') or target_srt_content or "",
             output_path=clean_out,
             job_id=job_id,
             burn_key="clean_plate",
@@ -596,10 +614,13 @@ def _execute_remaining_steps(
             re_burn_ass_path=None,
             tts_audio_path=None,
             extra_regions=clean_opts.get("extra_regions"),
+            timing_guard=clean_opts.get('visual_guard', True),
         )
         _check_cancel(job)
         if not os.path.isfile(clean_out) or os.path.getsize(clean_out) == 0:
             raise RuntimeError('Không tạo được video sạch')
+        clean_result.setdefault('sub_region', dict(sub_reg))
+        job['source_sub_region'] = dict(clean_result['sub_region'])
         job['step_results']['clean'] = clean_result
         if os.path.exists(clean_out):
             clean_video_path = clean_out
@@ -705,14 +726,19 @@ def _execute_remaining_steps(
         clean_hardsub = not already_cleaned
 
         sub_reg = None
-        if not already_cleaned:
-            if burn_opts.get("region_mode") == "manual" and burn_opts.get("sub_region"):
-                sub_reg = burn_opts["sub_region"]
+        if burn_opts.get("region_mode") == "manual" and burn_opts.get("sub_region"):
+            sub_reg = burn_opts["sub_region"]
+        elif already_cleaned:
+            # Original glyphs are gone: do not OCR the cleaned video and fall
+            # back to a different default position for the translated subtitle.
+            sub_reg = job.get('source_sub_region')
 
         burn_info = burn_sub_video(
             job_id=job_id,
             lang=target_lang,
             srt_content=target_srt_content,
+            clean_timing_srt=job.get('source_visual_srt'),
+            timing_guard=clean_opts.get('visual_guard', True),
             sub_region=sub_reg,
             extra_regions=burn_opts.get("extra_regions"),
             render_mode=r_mode,
@@ -735,21 +761,29 @@ def _execute_remaining_steps(
         _check_cancel(job)
         if not final_burned_path or not os.path.isfile(final_burned_path) or os.path.getsize(final_burned_path) == 0:
             raise RuntimeError('Render chưa tạo được video đầu ra hợp lệ')
-        job['step_results']['burn'] = burn_info
-        if final_burned_path and os.path.exists(final_burned_path):
-            bsize = os.path.getsize(final_burned_path)
-            job[f"burn_{target_lang}"] = {
-                "status": "done",
-                "path": str(final_burned_path),
-                "filename": Path(final_burned_path).name,
-                "size": bsize,
-            }
-            job["artifacts"]["final_video"] = str(final_burned_path)
+        # Commit parent artifacts and terminal status together, instead of
+        # leaving an intermediate 85% snapshot after a completed child render.
+        bsize = os.path.getsize(final_burned_path)
+        finished_steps = dict(job.get('step_results') or {})
+        finished_steps['burn'] = burn_info
+        finished_artifacts = dict(job.get('artifacts') or {})
+        finished_artifacts['final_video'] = str(final_burned_path)
+        final_fields = {
+            'step_results': finished_steps,
+            'artifacts': finished_artifacts,
+            f'burn_{target_lang}': {
+                'status': 'done', 'path': str(final_burned_path),
+                'filename': Path(final_burned_path).name, 'size': bsize,
+            },
+        }
+    else:
+        final_fields = {}
 
     # HOÀN TẤT QUY TRÌNH (DONE)
     # =========================================================================
     _check_cancel(job)
     job.update({
+        **final_fields,
         "status": "done",
         "progress": 100,
         "active_step": "completed",

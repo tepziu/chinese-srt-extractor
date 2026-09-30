@@ -1,5 +1,7 @@
 """Read-only stop preflight; never terminates other software."""
 from services.runtime_state import JobRegistry, TERMINAL, host_lock, process_alive
+from services.pipeline_completion import reconcile_final_render
+from config import OUTPUT_FOLDER
 
 
 def main():
@@ -10,6 +12,11 @@ def main():
             active = []
             for jid, job in snapshots.items():
                 if not job:
+                    continue
+                # A render may have finished before its parent recorded the
+                # terminal update. Verify the stable media before blocking a
+                # safe restart on a stale 85% pipeline.
+                if reconcile_final_render(job, jid, OUTPUT_FOLDER):
                     continue
                 status = job.get('status')
                 if status in TERMINAL | {'uploaded', 'awaiting_review', 'interrupted'}:

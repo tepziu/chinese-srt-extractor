@@ -50,6 +50,8 @@ def validate_pipeline_options(data):
     if sub.get('engine', 'hybrid') not in {'gemini', 'whisper', 'hybrid'}:
         raise ValueError("Engine phụ đề không được hỗ trợ")
     sub['pause_for_review'] = parse_bool(sub.get('pause_for_review'), False)
+    sub['visual_timing'] = parse_bool(sub.get('visual_timing'), False)
+    clean['visual_guard'] = parse_bool(clean.get('visual_guard'), True)
     if tts.get('engine', 'edge') not in {'edge', 'gemini', 'omnivoice'}:
         raise ValueError("Engine TTS không được hỗ trợ")
     if clean.get('engine', 'opencv') not in {'opencv', 'lama'}:

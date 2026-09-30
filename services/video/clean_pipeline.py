@@ -1,6 +1,6 @@
 """
 clean_pipeline.py — End-to-end AI Clean Plate Video Inpainting Pipeline.
-Completely removes hardcoded Chinese subtitles by cropping only active subtitle frames,
+Processes hardcoded subtitles using source intervals and bounded visual fallback,
 running inpainting (OpenCV / LaMa), feather-blending, and re-encoding via FFmpeg NVENC.
 """
 
@@ -22,6 +22,8 @@ from services.video.inpainters.lama_inpaint import LamaInpainter
 from services.video.inpainters.opencv_inpaint import OpenCVInpainter
 from services.media_process import FrameEncoder, encoder_args
 from services.video.mask_generator import feather_blend, generate_text_mask
+from services.srt_utils import parse_srt_timing
+from services.video.timing_guard import SubtitleTimingGuard
 
 
 def clean_video_pipeline(
@@ -35,6 +37,7 @@ def clean_video_pipeline(
     re_burn_ass_path: str | None = None,
     tts_audio_path: str | None = None,
     extra_regions: list | None = None,
+    timing_guard: bool = True,
 ) -> dict:
     """Execute AI Clean Plate inpainting pipeline.
 
@@ -80,6 +83,27 @@ def clean_video_pipeline(
 
     # Extract subtitle intervals from SRT
     intervals = extract_subtitle_intervals(srt_content, min_gap=0.5, pad_start=0.10, pad_end=0.15)
+    guard = None
+    extra_presence_intervals = []
+    detected_outside_srt_frames = 0
+    guard_error = None
+    guard_started = time.monotonic()
+    if timing_guard and intervals:
+        try:
+            guard = SubtitleTimingGuard.from_video(
+                video_path, parse_srt_timing(srt_content), (sub_x, sub_y, sub_w, sub_h),
+                cancelled=lambda: bool(job_id and jobs.get(job_id, {}).get('cancel')),
+            )
+            extra_presence_intervals, detected_outside_srt_frames = guard.scan_extra_intervals(
+                video_path, intervals, (sub_x, sub_y, sub_w, sub_h),
+                cancelled=lambda: bool(job_id and jobs.get(job_id, {}).get('cancel')),
+            )
+        except Exception as exc:
+            if job_id and jobs.get(job_id, {}).get('cancel'):
+                cap.release()
+                raise
+            guard_error = str(exc)[:200]
+    guard_prepare_seconds = time.monotonic() - guard_started
 
     from contextlib import nullcontext
     from config import acquire_gpu_slot
@@ -109,6 +133,7 @@ def clean_video_pipeline(
                '-movflags', '+faststart', str(output_path)]
         writer = FrameEncoder(cmd, job_id)
         interval_idx = 0
+        presence_idx = 0
         succeeded = False
 
         if job_id and jobs.get(job_id):
@@ -119,6 +144,7 @@ def clean_video_pipeline(
 
         frame_idx = 0
         inpainted_count = 0
+        recovered_boundary_frames = 0
         t_start = time.time()
 
         try:
@@ -134,16 +160,27 @@ def clean_video_pipeline(
                 while interval_idx < len(intervals) and intervals[interval_idx][1] < current_time:
                     interval_idx += 1
                 has_sub = not intervals or (interval_idx < len(intervals) and intervals[interval_idx][0] <= current_time)
+                while presence_idx < len(extra_presence_intervals) and extra_presence_intervals[presence_idx][1] < current_time:
+                    presence_idx += 1
+                extra_present = (presence_idx < len(extra_presence_intervals) and
+                                 extra_presence_intervals[presence_idx][0] <= current_time)
 
+                mask = None
+                crop_strip = frame[sub_y : sub_y + sub_h, sub_x : sub_x + sub_w]
                 if has_sub:
-                    crop_strip = frame[sub_y : sub_y + sub_h, sub_x : sub_x + sub_w]
-                    # Generate accurate text mask directly on current frame with full outline dilation
                     mask = generate_text_mask(crop_strip, dilation_radius=14)
-                    if mask.max() > 0:
-                        inpainted_strip = inpainter.inpaint(crop_strip, mask)
-                        blended_strip = feather_blend(crop_strip, inpainted_strip, mask, blur_ksize=9)
-                        frame[sub_y : sub_y + sub_h, sub_x : sub_x + sub_w] = blended_strip
-                        inpainted_count += 1
+                elif guard is not None:
+                    # An approximate/unverified SRT is not enough to skip visible
+                    # source glyphs. Extra erasing requires a visual reference
+                    # from this video; brightness alone does not trigger it.
+                    mask = guard.mask_if_visible(crop_strip, current_time, allow_style=extra_present)
+                    if mask is not None:
+                        recovered_boundary_frames += 1
+                if mask is not None and mask.max() > 0:
+                    inpainted_strip = inpainter.inpaint(crop_strip, mask)
+                    blended_strip = feather_blend(crop_strip, inpainted_strip, mask, blur_ksize=9)
+                    frame[sub_y : sub_y + sub_h, sub_x : sub_x + sub_w] = blended_strip
+                    inpainted_count += 1
 
                 # Inpaint extra regions (e.g. top title card, logos)
                 if extra_regions:
@@ -217,6 +254,21 @@ def clean_video_pipeline(
         "timing_mode": "cfr",
         "audio_replaced": has_tts,
         "inpainted_frames": inpainted_count,
+        "timing_strategy": "source_srt_visual_guard" if guard is not None else "srt_intervals" if intervals else "all_frames",
+        "timing_guard": {
+            "enabled": bool(timing_guard and intervals),
+            "templates": guard.template_count if guard is not None else 0,
+            "missing_templates": guard.missing_templates if guard is not None else len(parse_srt_timing(srt_content)),
+            "recovered_frames": recovered_boundary_frames,
+            "detected_outside_srt_frames": detected_outside_srt_frames,
+            "presence_gap_intervals": guard.presence_gap_intervals if guard is not None else [],
+            "prepare_seconds": round(guard_prepare_seconds, 3),
+            "window_seconds": guard.window if guard is not None else 0,
+            "error": guard_error,
+        },
+        "qc_status": "not_checked",
+        "sub_region": {**sub_region, "x_ratio": sub_x/width, "y_ratio": sub_y/height,
+                       "w_ratio": sub_w/width, "h_ratio": sub_h/height},
     }
 
     if job_id and jobs.get(job_id):

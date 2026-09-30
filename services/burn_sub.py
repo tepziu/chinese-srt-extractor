@@ -203,6 +203,7 @@ def _srt_to_ass(
     sub_region: dict,
     extra_ass_styles: list[str] | None = None,
     extra_ass_events: list[str] | None = None,
+    layout_report: dict | None = None,
 ) -> str:
     """Convert SRT to ASS with styling fitted cleanly inside the tight sub_region."""
     from services.srt_utils import parse_srt
@@ -217,8 +218,13 @@ def _srt_to_ass(
     # Standard readable font size (proportional to resolution)
     font_size = max(20, min(56, int(play_res_y * 0.038)))
 
-    # Top margin vertically centered inside sub_region
-    margin_top = sub_y + max(2, int((sub_h - font_size) * 0.45))
+    center_x = round(sub_x + sub_w/2)
+    center_y = round(sub_y + sub_h/2)
+    margin_top = 0
+    from services.video.subtitle_layout import fit_subtitle
+    if layout_report is not None:
+        layout_report.update(region=dict(sub_region), center_x=center_x, center_y=center_y,
+                             overflow_cues=[], font_sizes=[])
 
     # Left and right margins
     margin_l = max(int(play_res_x * 0.04), sub_x)
@@ -261,29 +267,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         start_ass = start_t[:-1] if len(start_t) > 10 else start_t
         end_ass = end_t[:-1] if len(end_t) > 10 else end_t
 
-        clean = text.replace("\r", "").strip()
-        # Smart line balancing: wrap into 2 lines if long
-        if "\n" not in clean and len(clean) > 36:
-            words = clean.split()
-            if len(words) >= 3:
-                mid = len(clean) // 2
-                best_i = 0
-                min_dist = 999
-                curr = 0
-                for w_idx in range(len(words) - 1):
-                    curr += len(words[w_idx]) + 1
-                    if abs(curr - mid) < min_dist:
-                        min_dist = abs(curr - mid)
-                        best_i = w_idx
-                clean = " ".join(words[:best_i + 1]) + r"\N" + " ".join(words[best_i + 1:])
-            else:
-                clean = clean.replace("\n", r"\N")
-        else:
-            clean = clean.replace("\n", r"\N")
-
-        ass_lines.append(
-            f"Dialogue: 0,{start_ass},{end_ass},BurnSub,,0,0,0,,{clean}"
-        )
+        clean = text.replace("\r", "").strip().replace('\\', '＼').replace('{', '｛').replace('}', '｝')
+        fitted = fit_subtitle(clean, sub_w, sub_h, font_size,
+                              min_size=max(12, int(play_res_y*.013)))
+        if layout_report is not None:
+            layout_report['font_sizes'].append(fitted['font_size'])
+            if fitted['overflow']:
+                layout_report['overflow_cues'].append(int(_srt_idx))
+        # Source-position anchor stays fixed when translated text wraps. Do not
+        # let libass smart wrapping push a top-aligned block below the old band.
+        rendered = r'\N'.join(fitted['lines'])
+        tags = r'{\an5\pos(%d,%d)\q2\fs%d}' % (center_x, center_y, fitted['font_size'])
+        ass_lines.append(f"Dialogue: 0,{start_ass},{end_ass},BurnSub,,0,0,0,,{tags}{rendered}")
 
     return '\n'.join(ass_lines) + '\n\n\n'
 def extract_subtitle_intervals(
@@ -445,9 +440,14 @@ def burn_sub_video(
     burn_new_sub: bool = True,
     keep_original_audio: bool = False,
     video_path: str = None,
+    clean_timing_srt: str | None = None,
+    timing_guard: bool = True,
 ):
     """Burn translated subtitle into video with tight bounding box and feathered edge blur."""
     burn_key = f"burn_{lang}"
+    timing_guard_info = None
+    if clean_timing_srt is None:
+        clean_timing_srt = jobs.get(job_id, {}).get('source_visual_srt')
 
     jobs[job_id][burn_key] = {
         "status": "processing",
@@ -516,16 +516,23 @@ def burn_sub_video(
             trimmed_video_path = trim_out
             if shifted_srt:
                 srt_content = shifted_srt
+            if clean_timing_srt:
+                from services.video.trimmer import shift_srt_timestamps
+                clean_timing_srt = shift_srt_timestamps(clean_timing_srt, trim_sec)
 
     # Build modular regions based on user choices:
     # 1. Hardsub region (bottom dialogue subtitles)
     method = "manual"
+    if not sub_region:
+        sub_region = jobs.get(job_id, {}).get('source_sub_region')
     if not (sub_region and "y_ratio" in sub_region):
         jobs[job_id][burn_key]["message"] = "🔍 Đang quét vị trí hardsub..."
         jobs[job_id][burn_key]["progress"] = 20
-        sub_region = detect_hardsub_region(video_path, job_id, srt_content=srt_content)
+        sub_region = detect_hardsub_region(video_path, job_id, srt_content=clean_timing_srt or srt_content)
         method = sub_region.get("method", "ocr_detected")
 
+    jobs[job_id].setdefault('source_sub_region', dict(sub_region))
+    subtitle_layout = {}
     all_blur_regions = []
     if clean_hardsub:
         all_blur_regions.append(sub_region)
@@ -615,6 +622,7 @@ def burn_sub_video(
                 srt_content, vw, vh, sub_region,
                 extra_ass_styles=extra_ass_styles,
                 extra_ass_events=extra_ass_events,
+                layout_report=subtitle_layout,
             )
             ass_path = OUTPUT_FOLDER / f"{job_id}_burn_{lang}.ass"
             ass_path.write_text(ass_content, encoding="utf-8-sig")
@@ -626,7 +634,7 @@ def burn_sub_video(
         clean_result = clean_video_pipeline(
             video_path=video_path,
             sub_region=sub_region,
-            srt_content=srt_content,
+            srt_content=clean_timing_srt or srt_content,
             output_path=out_file,
             job_id=job_id,
             burn_key=burn_key,
@@ -634,9 +642,11 @@ def burn_sub_video(
             re_burn_ass_path=re_burn_ass,
             tts_audio_path=audio_to_mux if (has_tts and render_mode != "clean") else None,
             extra_regions=extra_inpaint,
+            timing_guard=timing_guard,
         )
         clean_result["sub_region"] = sub_region
         clean_result["region_method"] = method
+        clean_result["subtitle_layout"] = subtitle_layout
         return clean_result
 
     # Output path
@@ -651,6 +661,7 @@ def burn_sub_video(
         srt_content, vw, vh, sub_region,
         extra_ass_styles=extra_ass_styles,
         extra_ass_events=extra_ass_events,
+        layout_report=subtitle_layout,
     )
     ass_path = OUTPUT_FOLDER / f"{job_id}_burn_{lang}.ass"
     ass_path.write_text(ass_content, encoding='utf-8-sig')
@@ -734,6 +745,8 @@ def burn_sub_video(
             "duration": round(total_duration, 1),
             "method": "pure_burn",
             "audio_replaced": has_tts,
+            "sub_region": dict(sub_region),
+            "subtitle_layout": subtitle_layout,
         }
         return jobs[job_id][burn_key]
 
@@ -770,7 +783,38 @@ def burn_sub_video(
         filter_complex = _build_opaque_band_filter(vw, vh, sub_region, ass_escaped)
         mask_args = []
     else:
-        intervals = extract_subtitle_intervals(srt_content)
+        original_timing = clean_timing_srt or srt_content
+        intervals = extract_subtitle_intervals(original_timing)
+        if timing_guard and clean_hardsub and intervals:
+            from services.video.timing_guard import SubtitleTimingGuard
+            from services.srt_utils import parse_srt_timing
+            started_guard = time.monotonic()
+            try:
+                sx = max(0, int(vw * sub_region.get('x_ratio', .05)))
+                sy = max(0, int(vh * sub_region.get('y_ratio', .86)))
+                sw = max(4, min(vw-sx, int(vw * sub_region.get('w_ratio', .90))))
+                sh = max(4, min(vh-sy, int(vh * sub_region.get('h_ratio', .09))))
+                box = (sx, sy, sw, sh)
+                is_cancelled = lambda: bool(jobs.get(job_id, {}).get('cancel'))
+                guard = SubtitleTimingGuard.from_video(video_path, parse_srt_timing(original_timing), box,
+                                                       cancelled=is_cancelled)
+                extra, recovered = guard.scan_extra_intervals(video_path, intervals, box, cancelled=is_cancelled)
+                merged = []
+                for start, end in sorted(intervals + extra):
+                    if merged and start <= merged[-1][1]:
+                        merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+                    else:
+                        merged.append((start, end))
+                intervals = merged
+                timing_guard_info = {'enabled': True, 'templates': guard.template_count,
+                                     'missing_templates': guard.missing_templates, 'recovered_frames': recovered,
+                                     'presence_gap_intervals': guard.presence_gap_intervals,
+                                     'prepare_seconds': round(time.monotonic()-started_guard, 3),
+                                     'window_seconds': guard.window, 'error': None}
+            except Exception as exc:
+                if jobs.get(job_id, {}).get('cancel'):
+                    raise
+                timing_guard_info = {'enabled': True, 'error': str(exc)[:200], 'recovered_frames': 0}
         timeline_enable = build_timeline_enable_expression(intervals)
         filter_complex = _build_blur_filter(
             vw, vh, all_blur_regions, ass_escaped,
@@ -887,6 +931,9 @@ def burn_sub_video(
             "sub_region": sub_region,
             "audio_replaced": has_tts,
             "blur_regions": len(all_blur_regions),
+            "timing_guard": timing_guard_info,
+            "qc_status": "not_checked",
+            "subtitle_layout": subtitle_layout,
         }
     finally:
         for mf in mask_files:

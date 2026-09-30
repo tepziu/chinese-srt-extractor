@@ -269,6 +269,8 @@ def process_video(job_id: str, video_path: str, model_size: str, translate_langs
         zh_filename = f"{video_stem}_zh.srt"
         zh_path = output_dir / zh_filename
         zh_path.write_text(srt_content, encoding="utf-8")
+        job['source_visual_srt'] = srt_content
+        job['source_timing_origin'] = 'audio_estimate'
 
         job.update({
             "status": "translating" if translate_langs else ("done" if manage_status else "processing"),

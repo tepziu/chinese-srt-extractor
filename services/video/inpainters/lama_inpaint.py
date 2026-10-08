@@ -27,6 +27,19 @@ class LamaInpainter(BaseInpainter):
 
         if self.model_path.exists():
             try:
+                # Ensure CUDA 12 / cuDNN DLLs are discoverable on Windows
+                cuda_candidates = [
+                    r"C:\Users\Admin\OneDrive - mta\Linh tinh\oneclick-subtitles-generator\.venv\Lib\site-packages\torch\lib",
+                ]
+                for c_dir in cuda_candidates:
+                    if os.path.isdir(c_dir):
+                        if hasattr(os, "add_dll_directory"):
+                            try:
+                                os.add_dll_directory(c_dir)
+                            except OSError:
+                                pass
+                        os.environ["PATH"] = c_dir + os.pathsep + os.environ.get("PATH", "")
+
                 import onnxruntime as ort
 
                 available = ort.get_available_providers()

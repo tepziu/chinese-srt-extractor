@@ -9,6 +9,8 @@ _sandbox = tempfile.TemporaryDirectory(prefix='studio_tests_')
 _root = Path(_sandbox.name)
 os.environ['STUDIO_RUNTIME_DIR'] = str(_root / 'runtime')
 os.environ['TELEGRAM_BOT_TOKEN'] = ''
+os.environ['DOUYIN_TIKTOK_OUTBOX_DIR'] = ''
+os.environ['DOUYIN_TIKTOK_RIGHTS_STATUS'] = 'review_required'
 import config
 config.TELEGRAM_BOT_TOKEN = ''
 config.UPLOAD_FOLDER = _root / 'uploads'

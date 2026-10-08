@@ -1,0 +1,184 @@
+{
+  "baseline_ref": "50891eb",
+  "opencv": "5.0.0",
+  "numpy": "2.4.4",
+  "opencv_threads": 12,
+  "repeats": 3,
+  "calls_per_round": 30,
+  "synthetic_only": true,
+  "moving_roi": false,
+  "features": [
+    {
+      "baseline_seconds": 0.069003,
+      "worktree_seconds": 0.045513,
+      "speedup": 1.516,
+      "baseline_runs": [
+        0.06151790003059432,
+        0.0690034999861382,
+        0.06936329999007285
+      ],
+      "worktree_runs": [
+        0.05108689999906346,
+        0.04339300002902746,
+        0.045512599986977875
+      ],
+      "roi": "430x90",
+      "equivalent": true,
+      "template_detected": true
+    },
+    {
+      "baseline_seconds": 0.146779,
+      "worktree_seconds": 0.073016,
+      "speedup": 2.01,
+      "baseline_runs": [
+        0.14880949998041615,
+        0.14254249999066815,
+        0.14677940000547096
+      ],
+      "worktree_runs": [
+        0.07301649998407811,
+        0.07225570001173764,
+        0.07363640004768968
+      ],
+      "roi": "960x144",
+      "equivalent": true,
+      "template_detected": true
+    },
+    {
+      "baseline_seconds": 0.390843,
+      "worktree_seconds": 0.138186,
+      "speedup": 2.828,
+      "baseline_runs": [
+        0.3908431999734603,
+        0.38933400000678375,
+        0.40852460003225133
+      ],
+      "worktree_runs": [
+        0.1416499000042677,
+        0.13167740002973005,
+        0.13818629999877885
+      ],
+      "roi": "1920x216",
+      "equivalent": true,
+      "template_detected": true
+    }
+  ],
+  "presence_scan": {
+    "baseline_seconds": 0.265958,
+    "worktree_seconds": 0.169217,
+    "speedup": 1.572,
+    "baseline_runs": [
+      0.26501239999197423,
+      0.2659579999744892,
+      0.27691309998044744
+    ],
+    "worktree_runs": [
+      0.1605561999604106,
+      0.169709799985867,
+      0.16921650001313537
+    ],
+    "equivalent": true,
+    "results": [
+      [
+        [
+          [
+            0.4,
+            0.8
+          ],
+          [
+            1.64,
+            1.84
+          ],
+          [
+            2.08,
+            2.32
+          ],
+          [
+            3.0,
+            3.2
+          ],
+          [
+            3.52,
+            3.84
+          ]
+        ],
+        34
+      ],
+      [
+        [
+          [
+            0.4,
+            0.8
+          ],
+          [
+            1.64,
+            1.84
+          ],
+          [
+            2.08,
+            2.32
+          ],
+          [
+            3.0,
+            3.2
+          ],
+          [
+            3.52,
+            3.84
+          ]
+        ],
+        34
+      ]
+    ],
+    "templates": [
+      2,
+      2
+    ],
+    "video_frames": 100,
+    "video_size": "960x540"
+  },
+  "clean_render": {
+    "baseline_seconds": 11.895632,
+    "worktree_seconds": 8.666888,
+    "speedup": 1.373,
+    "baseline_runs": [
+      12.193379700009245,
+      11.895632400002796,
+      11.548099500010721
+    ],
+    "worktree_runs": [
+      9.06621780002024,
+      8.666887699975632,
+      7.595485099998768
+    ],
+    "decoded_outputs": [
+      {
+        "sha256": "4f43d5314afb20587c9a05268432d1863f7c2f705ff3775734f9e50ec91e60d5",
+        "frames": 100
+      },
+      {
+        "sha256": "4f43d5314afb20587c9a05268432d1863f7c2f705ff3775734f9e50ec91e60d5",
+        "frames": 100
+      }
+    ],
+    "equivalent": true,
+    "source_frames": 100,
+    "recovered_frames": [
+      18,
+      18
+    ],
+    "inpaint_cache": [
+      null,
+      {
+        "enabled": true,
+        "scope": "last_exact_roi_and_mask",
+        "hits": 27,
+        "misses": 45,
+        "max_pixels": 1000000,
+        "cached_bytes": 967680
+      }
+    ],
+    "encoder": "libx264 fast CRF 20; no GPU/provider calls"
+  },
+  "correctness_passed": true
+}

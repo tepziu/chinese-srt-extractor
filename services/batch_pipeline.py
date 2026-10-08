@@ -127,7 +127,7 @@ def validate_batch_options(data: dict[str, Any] | None) -> dict[str, Any]:
         raise ValueError("translation_mode không hợp lệ")
 
     result["old_subtitle_removal"] = str(
-        result.get("old_subtitle_removal") or "opaque_band"
+        result.get("old_subtitle_removal") or "inpaint_burn"
     ).strip().lower()
     if result["old_subtitle_removal"] not in {"opaque_band", "blur", "inpaint_burn"}:
         raise ValueError("old_subtitle_removal không hợp lệ")

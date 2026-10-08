@@ -719,8 +719,8 @@ def _execute_remaining_steps(
         bgm_mode = "keep_original" if keep_original_audio else ("duck" if audio_mode == "tts_ducking" else ("none" if audio_mode == 'tts_only' else "ai"))
 
         # NẾU ĐÃ XÓA CHỮ Ở BƯỚC 3 -> PURE BURN (In sub mới thẳng lên video sạch, không inpaint lại lần 2!)
-        # NẾU CHƯA XÓA Ở BƯỚC 3 -> BLUR (Tự động che mờ viền mềm để không bị lẫn vào chữ cũ)
-        r_mode = "pure_burn" if already_cleaned else burn_opts.get('render_mode', "blur")
+        # Chưa xóa chữ: mặc định Clean Plate Inpainting rồi in phụ đề mới.
+        r_mode = "pure_burn" if already_cleaned else burn_opts.get('render_mode', "inpaint_burn")
         if r_mode not in {'pure_burn','blur','inpaint_burn'}:
             raise ValueError('Chế độ render không hợp lệ')
         clean_hardsub = not already_cleaned

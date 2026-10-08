@@ -56,7 +56,8 @@ def validate_pipeline_options(data):
         raise ValueError("Engine TTS không được hỗ trợ")
     if clean.get('engine', 'opencv') not in {'opencv', 'lama'}:
         raise ValueError("Engine xóa chữ không được hỗ trợ")
-    if burn.get('render_mode', 'blur') not in {'pure_burn', 'blur', 'inpaint_burn'}:
+    burn.setdefault('render_mode', 'inpaint_burn')
+    if burn['render_mode'] not in {'pure_burn', 'blur', 'inpaint_burn'}:
         raise ValueError('Chế độ render không hợp lệ')
     if burn.get('audio_mode', 'keep_original') not in {'keep_original', 'tts_only', 'tts_ducking', 'tts_ai_bgm', 'tts_clean_bgm'}:
         raise ValueError('Chế độ âm thanh không hợp lệ')

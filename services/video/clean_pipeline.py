@@ -271,6 +271,10 @@ def clean_video_pipeline(
                        "w_ratio": sub_w/width, "h_ratio": sub_h/height},
     }
 
+    cache_info = getattr(inpainter, 'cache_info', None)
+    if callable(cache_info):
+        result['inpaint_cache'] = cache_info()
+
     if job_id and jobs.get(job_id):
         jobs[job_id][burn_key] = result
 

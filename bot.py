@@ -1384,7 +1384,7 @@ async def _process_and_reply(update, context, status_msg, job_id, file_path, pre
                     burn_func = partial(
                         burn_sub_video,
                         job_id, lang, srt_content, sub_region, extra_regions,
-                        render_mode=prefs.get("vmode", "blur"),
+                        render_mode=prefs.get("vmode", "inpaint_burn"),
                         trim_intro=prefs.get("trim_intro", "auto"),
                         translate_title=prefs.get("translate_title", False),
                         title_lang=lang,

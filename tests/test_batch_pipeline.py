@@ -38,12 +38,12 @@ def test_scan_video_folder_rejects_path_outside_allowlist(tmp_path):
         scan_video_folder(str(outside), allowed_roots=[allowed])
 
 
-def test_validate_batch_options_defaults_to_english_and_strict_opaque_mode():
+def test_validate_batch_options_defaults_to_english_and_clean_plate():
     options = validate_batch_options({})
 
     assert options["target_lang"] == "en"
     assert options["output_mode"] == "srt_and_video"
-    assert options["old_subtitle_removal"] == "opaque_band"
+    assert options["old_subtitle_removal"] == "inpaint_burn"
     assert options["strict_translation"] is True
     assert options["max_concurrency"] == 1
 

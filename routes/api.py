@@ -1078,7 +1078,7 @@ def get_render_modes():
                 "icon": "🌟",
             },
         },
-        "default": "blur",
+        "default": "inpaint_burn",
     })
 
 
@@ -1489,9 +1489,9 @@ def trigger_burnsub(job_id, lang):
         except (ValueError, TypeError):
             pass
 
-    render_mode = str(data.get("render_mode", "blur")).lower().strip()
+    render_mode = str(data.get("render_mode", "inpaint_burn")).lower().strip()
     if render_mode not in ("blur", "clean", "inpaint_burn"):
-        render_mode = "blur"
+        render_mode = "inpaint_burn"
     inpaint_engine = str(data.get("inpaint_engine", "opencv")).lower().strip()
     if inpaint_engine not in ("opencv", "lama"):
         inpaint_engine = "opencv"

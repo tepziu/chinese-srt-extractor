@@ -20,7 +20,60 @@ class _Features:
     edge: np.ndarray
 
 
-def _outlined_glyphs(image: np.ndarray) -> _Features | None:
+class _FrameEvidence:
+    """One frame-local color/edge extraction, shared by detection and masking.
+
+    Only the current ROI is retained. Learned references still store their two
+    small masks; no full-frame evidence is cached across videos or cues.
+    """
+    def __init__(self, image: np.ndarray):
+        self.image = image
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        white = cv2.inRange(hsv, (0, 0, 180), (180, 80, 255))
+        yellow = cv2.inRange(hsv, (16, 65, 110), (38, 255, 255))
+        self.bright = cv2.bitwise_or(white, yellow)
+        self.dark = cv2.inRange(hsv, (0, 0, 0), (180, 255, 95))
+        self._core = None
+        self._edge = None
+
+    @property
+    def core(self):
+        if self._core is None:
+            self._core = cv2.morphologyEx(self.bright, cv2.MORPH_CLOSE,
+                                          np.ones((3, 3), np.uint8))
+        return self._core
+
+    @property
+    def edge(self):
+        if self._edge is None:
+            self._edge = cv2.Canny(cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY), 60, 160)
+        return self._edge
+
+    def features(self) -> _Features:
+        return _Features(self.core, self.edge)
+
+
+def _component_outline_fraction(labels: np.ndarray, dark: np.ndarray,
+                                label: int, stats: np.ndarray) -> float:
+    """Measure exactly the same 5x5 rim, without allocating a full-ROI mask.
+
+    A 5x5 dilation reaches two pixels beyond the component bounding box. Keep
+    that halo (clipped at the image boundary) so rim area and dark overlap are
+    identical to the original whole-image calculation.
+    """
+    x, y, width, height = (int(value) for value in stats[:4])
+    left, top = max(0, x - 2), max(0, y - 2)
+    right = min(labels.shape[1], x + width + 2)
+    bottom = min(labels.shape[0], y + height + 2)
+    component = (labels[top:bottom, left:right] == label).astype(np.uint8) * 255
+    rim = cv2.subtract(cv2.dilate(component, np.ones((5, 5), np.uint8)), component)
+    area = np.count_nonzero(rim)
+    if not area:
+        return 0.0
+    return np.count_nonzero(cv2.bitwise_and(rim, dark[top:bottom, left:right])) / area
+
+
+def _outlined_glyphs(image: np.ndarray, *, evidence: _FrameEvidence | None = None) -> _Features | None:
     """Keep a coherent line of bright glyphs with nearby dark outlines.
 
     Background brightness alone is never sufficient evidence for extra erasing.
@@ -29,12 +82,8 @@ def _outlined_glyphs(image: np.ndarray) -> _Features | None:
     height, width = image.shape[:2]
     if height < 12 or width < 24:
         return None
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    white = cv2.inRange(hsv, (0, 0, 180), (180, 80, 255))
-    yellow = cv2.inRange(hsv, (16, 65, 110), (38, 255, 255))
-    bright = cv2.morphologyEx(cv2.bitwise_or(white, yellow), cv2.MORPH_CLOSE,
-                            np.ones((3, 3), np.uint8))
-    dark = cv2.inRange(hsv, (0, 0, 0), (180, 255, 95))
+    evidence = evidence if evidence is not None else _FrameEvidence(image)
+    bright, dark = evidence.core, evidence.dark
     count, labels, stats, _ = cv2.connectedComponentsWithStats(bright)
     candidates = []
     for label in range(1, count):
@@ -44,10 +93,7 @@ def _outlined_glyphs(image: np.ndarray) -> _Features | None:
             continue
         if area / max(1, w*h) > .85:
             continue  # Solid bright patches/windows are not character strokes.
-        component = (labels == label).astype(np.uint8) * 255
-        rim = cv2.subtract(cv2.dilate(component, np.ones((5, 5), np.uint8)), component)
-        rim_area = np.count_nonzero(rim)
-        if not rim_area or np.count_nonzero(cv2.bitwise_and(rim, dark)) / rim_area < .18:
+        if _component_outline_fraction(labels, dark, label, stats[label]) < .18:
             continue
         candidates.append((label, float(y + h / 2), int(h)))
     if len(candidates) < 3:
@@ -63,19 +109,22 @@ def _outlined_glyphs(image: np.ndarray) -> _Features | None:
     selected = [label for row in rows if len(row) >= 3 for label, _ in row]
     if len(selected) < 3:
         return None
-    core = np.isin(labels, selected).astype(np.uint8) * 255
+    selected_labels = np.zeros(count, np.uint8)
+    selected_labels[selected] = 255
+    core = selected_labels[labels]
     coverage = np.count_nonzero(core) / (height * width)
     if not .002 <= coverage <= .45:
         return None
-    edges = cv2.Canny(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), 60, 160)
+    edges = evidence.edge
     edges = cv2.bitwise_and(edges, cv2.dilate(core, np.ones((5, 5), np.uint8)))
     if np.count_nonzero(edges) < 40:
         return None
     return _Features(core, edges)
 
 
-def _mask_from_core(image: np.ndarray, core: np.ndarray) -> np.ndarray:
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+def _mask_from_core(image: np.ndarray, core: np.ndarray, *,
+                    evidence: _FrameEvidence | None = None) -> np.ndarray:
+    evidence = evidence if evidence is not None else _FrameEvidence(image)
     # The matching cores prove the line exists, but Chinese radicals can be
     # disconnected/shorter than the components used to identify that line.
     # Recover *all* bright strokes within each confirmed line envelope rather
@@ -87,10 +136,8 @@ def _mask_from_core(image: np.ndarray, core: np.ndarray) -> np.ndarray:
         xs = np.flatnonzero(np.any(core[top:bottom] > 0, axis=0))
         if xs.size:
             envelope[max(0, top-4):min(core.shape[0], bottom+4), max(0, xs[0]-4):min(core.shape[1], xs[-1]+5)] = 255
-    bright = cv2.bitwise_or(cv2.inRange(hsv, (0, 0, 180), (180, 80, 255)),
-                           cv2.inRange(hsv, (16, 65, 110), (38, 255, 255)))
-    core = cv2.bitwise_or(core, cv2.bitwise_and(bright, envelope))
-    dark = cv2.inRange(hsv, (0, 0, 0), (180, 255, 95))
+    core = cv2.bitwise_or(core, cv2.bitwise_and(evidence.bright, envelope))
+    dark = evidence.dark
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     outline = cv2.bitwise_and(dark, cv2.dilate(core, kernel, iterations=2))
     full = cv2.morphologyEx(cv2.bitwise_or(core, outline), cv2.MORPH_CLOSE, kernel)
@@ -108,13 +155,7 @@ def reference_matches(expected: _Features, image: np.ndarray) -> bool:
     # The reference already established which pixels belong to text. Re-running
     # component/line selection on every frame lets moving clothing/background
     # change the inferred line and can falsely move an otherwise stable cue.
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    white = cv2.inRange(hsv, (0, 0, 180), (180, 80, 255))
-    yellow = cv2.inRange(hsv, (16, 65, 110), (38, 255, 255))
-    core = cv2.morphologyEx(cv2.bitwise_or(white, yellow), cv2.MORPH_CLOSE,
-                          np.ones((3, 3), np.uint8))
-    edges = cv2.Canny(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), 60, 160)
-    return _features_match(expected, _Features(core, edges))
+    return _features_match(expected, _FrameEvidence(image).features())
 
 
 def _features_match(expected: _Features, current: _Features) -> bool:
@@ -204,6 +245,39 @@ class SubtitleTimingGuard:
                        and abs(cx-x) <= max(20, current.core.shape[1]*.22)
                        for h,y,x in self.styles) for ch,cy,cx in lines)
 
+    def _matched_reference(self, evidence: _FrameEvidence, lo: int, hi: int):
+        if lo >= hi:
+            return None
+        # A nearly solid white panel can cover every expected stroke and make a
+        # one-way template overlap look convincing. Preserve the original
+        # coverage bound, and demand reverse spatial overlap as well.
+        coverage = np.count_nonzero(evidence.core) / evidence.core.size
+        if not .002 <= coverage <= .45:
+            return None
+        raw = None
+        for row in self.references[lo:hi]:
+            expected = row['features']
+            if expected.core.shape != evidence.image.shape[:2]:
+                continue
+            x, y, width, height = cv2.boundingRect(expected.core)
+            left, top = max(0, x-1), max(0, y-1)
+            right = min(expected.core.shape[1], x+width+1)
+            bottom = min(expected.core.shape[0], y+height+1)
+            current_core = evidence.core[top:bottom, left:right]
+            current_pixels = np.count_nonzero(current_core)
+            if not current_pixels:
+                continue
+            near_expected = cv2.dilate(expected.core[top:bottom, left:right],
+                                       np.ones((3, 3), np.uint8))
+            precision = np.count_nonzero(cv2.bitwise_and(current_core, near_expected)) / current_pixels
+            if precision < .72:
+                continue
+            if raw is None:
+                raw = evidence.features()
+            if _features_match(expected, raw):
+                return expected
+        return None
+
     def scan_extra_intervals(self, path: str, base_intervals: list[tuple], box: tuple, cancelled=None):
         """Find old-text presence outside SRT, including wholly omitted cues.
 
@@ -215,6 +289,9 @@ class SubtitleTimingGuard:
         if not self.template_count:
             return [], 0
         cap = cv2.VideoCapture(str(path))
+        if not cap.isOpened():
+            cap.release()
+            raise RuntimeError('Không mở được video để kiểm tra vùng biên phụ đề')
         fps = float(cap.get(cv2.CAP_PROP_FPS)) or 25.0
         x,y,w,h = box
         index = interval_index = recovered = 0
@@ -241,22 +318,34 @@ class SubtitleTimingGuard:
                 while interval_index<len(base_intervals) and base_intervals[interval_index][1]<timestamp:
                     interval_index+=1
                 active=interval_index<len(base_intervals) and base_intervals[interval_index][0]<=timestamp
-                candidate=None;known=False
+                candidate = None
+                evidence = None
+                known = False
                 if not active:
-                    ok,frame=cap.retrieve()
+                    ok, frame = cap.retrieve()
                     if ok and frame is not None:
-                        strip=frame[y:y+h,x:x+w]
-                        candidate=_outlined_glyphs(strip)
-                        if candidate is not None:
-                            lo=bisect_left(self.ends,timestamp-self.window)
-                            hi=bisect_right(self.starts,timestamp+self.window)
-                            known=any(row['features'].core.shape==candidate.core.shape and
-                                      _features_match(row['features'],candidate) for row in self.references[lo:hi])
-                            if not known and not self._matches_style(candidate):candidate=None
+                        strip = frame[y:y+h, x:x+w]
+                        if strip.shape[0] >= 12 and strip.shape[1] >= 24:
+                            evidence = _FrameEvidence(strip)
+                            candidate = _outlined_glyphs(strip, evidence=evidence)
+                            lo = bisect_left(self.ends, timestamp-self.window)
+                            hi = bisect_right(self.starts, timestamp+self.window)
+                            if candidate is not None:
+                                known = any(row['features'].core.shape == candidate.core.shape and
+                                            _features_match(row['features'], candidate)
+                                            for row in self.references[lo:hi])
+                            else:
+                                # Scene brightness can defeat fresh component selection
+                                # without changing the already learned text/outline.
+                                candidate = self._matched_reference(evidence, lo, hi)
+                                known = candidate is not None
+                            if candidate is not None and not known and not self._matches_style(candidate):
+                                candidate = None
                 if candidate is None:
                     flush(timestamp)
                 else:
-                    if previous is None or not reference_matches(previous,strip):
+                    assert evidence is not None
+                    if previous is None or not _features_match(previous, evidence.features()):
                         flush(timestamp)
                         run_start=timestamp
                     run_count+=1
@@ -274,13 +363,19 @@ class SubtitleTimingGuard:
         hi = bisect_right(self.starts, timestamp + self.window)
         if lo >= hi and not allow_style:
             return None
-        current = _outlined_glyphs(strip)
+        if strip.shape[0] < 12 or strip.shape[1] < 24:
+            return None
+        evidence = _FrameEvidence(strip)
+        current = _outlined_glyphs(strip, evidence=evidence)
         if current is None:
+            expected = self._matched_reference(evidence, lo, hi)
+            if expected is not None:
+                return _mask_from_core(strip, expected.core, evidence=evidence)
             return None
         for row in self.references[lo:hi]:
             expected = row['features']
             if expected.core.shape == current.core.shape and _features_match(expected, current):
-                return _mask_from_core(strip, current.core)
+                return _mask_from_core(strip, current.core, evidence=evidence)
         if allow_style and self._matches_style(current):
-            return _mask_from_core(strip, current.core)
+            return _mask_from_core(strip, current.core, evidence=evidence)
         return None

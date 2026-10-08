@@ -265,8 +265,8 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                 </label>
                 <label style="font-size:11px;">Xử lý phụ đề Trung cũ
                     <select id="batchRemovalMode" style="width:100%; margin-top:5px; padding:7px; background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:6px;">
-                        <option value="opaque_band" selected>Che kín 100% (ổn định)</option>
-                        <option value="inpaint_burn">Clean Plate / Inpaint</option>
+                        <option value="opaque_band">Che kín 100% (ổn định)</option>
+                        <option value="inpaint_burn" selected>Clean Plate / Inpaint (mặc định)</option>
                         <option value="blur">Blur theo thời điểm</option>
                     </select>
                 </label>
@@ -3571,7 +3571,12 @@ function uploadWithProgress(url, formData, onProgress) {
         } catch(e) { alert('Lỗi lưu preset: ' + e); }
         }
 
-        let currentRenderMode = localStorage.getItem('preferred_render_mode') || 'blur';
+        // Migrate the previous default once; later manual choices remain persistent.
+        if (localStorage.getItem('clean_plate_default_version') !== '1') {
+            localStorage.setItem('preferred_render_mode', 'inpaint_burn');
+            localStorage.setItem('clean_plate_default_version', '1');
+        }
+        let currentRenderMode = localStorage.getItem('preferred_render_mode') || 'inpaint_burn';
 
         function setRenderMode(mode) {
             currentRenderMode = mode;
@@ -3615,7 +3620,7 @@ function uploadWithProgress(url, formData, onProgress) {
             const bgmVolume = document.getElementById('bgmVolumeSlider') ? parseFloat(document.getElementById('bgmVolumeSlider').value) : 0.8;
 
             const body = {
-                render_mode: currentRenderMode || 'blur',
+                render_mode: currentRenderMode || 'inpaint_burn',
                 inpaint_engine: 'opencv',
                 sub_region: mode === 'manual' ? subRegion : undefined,
                 extra_regions: mode === 'manual' ? extraRegions : undefined,
